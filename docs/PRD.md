@@ -141,7 +141,7 @@ A user can pick any of the first five. `not_done` is never user-selectable and o
 - if `d` is a Saturday, it is the 1st or 3rd Saturday of its month (`ceil(day_of_month / 7)` is 1 or 3)
 - `d` is not in `holidays`
 
-Holidays (seed from `fixtures/holidays.json`):
+Holidays (loaded from `fixtures/holidays.json` by a migration, so every environment, production included, has them):
 
 | Date | Day | Holiday |
 | --- | --- | --- |
@@ -156,7 +156,7 @@ Holidays (seed from `fixtures/holidays.json`):
 | 2027-01-26 | Tue | Republic Day |
 | 2027-03-22 | Mon | Holi |
 
-`calendar_days` is materialised for 2026-01-01 to 2027-12-31 by `refresh_calendar()` and refreshed whenever holidays change. `next_working_day(d)` and `prev_working_day(d)` read it. The calendar must be extended before it runs out; Sync health warns 60 days ahead.
+`calendar_days` is materialised for 2026-01-01 to 2027-12-31 by `refresh_calendar()`, first by that same migration, and refreshed whenever holidays change. `next_working_day(d)` and `prev_working_day(d)` read it. The calendar must be extended before it runs out; Sync health warns 60 days ahead.
 
 ### 6.3 Dates
 
@@ -254,7 +254,7 @@ Worked example (Filing Buddy task G21, planned Wed 30 Sep, `in_progress` when th
 - `completedOnFormat`: `{type: "date"}` writes a real date (USER_ENTERED `yyyy-mm-dd`); `{type: "text", pattern}` writes text in that pattern (Filing Buddy uses "EEE d MMM", e.g. "Mon 28 Sep"); `null` means not written.
 
 ### 6.9 Knit Note text
-Rendered by the pure function `renderKnitNote(task, taskDays, today)`, max 80 characters, dates as `EEE d MMM`:
+Rendered by the pure function `renderKnitNote(task, taskDays, today)`, max 80 characters, dates as `EEE d MMM`. It is the only implementation of these rules: the push job calls it when it builds the cell writes (10.4), from the task's state at that moment. SQL never renders the note.
 
 | State | Note |
 | --- | --- |
@@ -468,7 +468,7 @@ create table outbox (
   id bigserial primary key,
   task_id uuid not null references tasks(id),
   tracker_id uuid not null references trackers(id),
-  payload jsonb not null,                     -- {status_value|null, completed_on|null, knit_note}
+  payload jsonb not null,                     -- {status_value|null, completed_on|null}; Knit Note rendered at push time (6.9)
   state outbox_state not null default 'pending',
   attempts int not null default 0,
   next_attempt_at timestamptz not null default now(),
@@ -568,7 +568,7 @@ All are `security definer`, set `search_path = public`, and check the caller the
 | `knit_today()` | any | `(now() at time zone 'Asia/Kolkata')::date` |
 | `is_working_day(d)`, `next_working_day(d)`, `prev_working_day(d)` | any | From `calendar_days` |
 | `refresh_calendar(from, to)` | admin | Rebuild `calendar_days` from the rules and `holidays` |
-| `set_task_status(task_id, status, reason)` | assigned user or admin | Validates: status is user-selectable; reason present for blocked/cancelled; target task-day not locked. Picks the target task-day (today's; else the task's future one; for open tasks creates a `completion` task-day on today). Updates task and task-day, sets `status_changed_on = knit_today()`, `hub_changed_at = now()`, bumps `trackers.state_version`, writes an `events` row, supersedes older pending outbox rows for the task, inserts a new outbox row with the rendered write-back payload. Returns the updated task view |
+| `set_task_status(task_id, status, reason)` | assigned user or admin | Validates: status is user-selectable; reason present for blocked/cancelled; target task-day not locked. Picks the target task-day (today's; else the task's future one; for open tasks creates a `completion` task-day on today). Updates task and task-day, sets `status_changed_on = knit_today()`, `hub_changed_at = now()`, bumps `trackers.state_version`, writes an `events` row, supersedes older pending outbox rows for the task, inserts a new outbox row with the write-back payload (the status word from `writeBack`, or null per N8, and `completed_on`). The Knit Note is rendered by the push job (6.9), not here. Returns the updated task view |
 | `admin_correct_task_day(task_day_id, status, reason)` | admin | Section 6.10, one transaction |
 | `apply_pull_plan(tracker_id, expected_state_version, plan jsonb, run_id)` | service role | Applies a pull plan atomically. If `state_version` changed since the plan was computed, applies nothing and returns `retry` |
 | `close_day(d)` | service role | Section 6.4, one transaction, idempotent. Refuses if `d >= knit_today()` |
@@ -578,8 +578,9 @@ All are `security definer`, set `search_path = public`, and check the caller the
 ### 9.2 Row Level Security
 - `app_users`: a user reads their own row; admin reads all. Writes only through admin server actions using the service role.
 - `tasks`, `task_days`, `events`: select allowed when the caller is admin, or the task has a `task_assignees` row for the caller. No insert, update or delete for `authenticated`; changes only through RPC.
+- `task_assignees`: select allowed when the caller is admin, or the row's `user_id` is the caller. No insert, update or delete for `authenticated`; rows change only through RPC and the pull job.
 - `trackers`: members can select trackers that have at least one task assigned to them (name and colour only, through a view `tracker_public`). Admin full select. Writes through admin server actions.
-- `outbox`, `sync_runs`, `day_closures`, `attention_items`, `job_leases`, `drive_files`, `settings`: admin select only (members can insert `attention_items` of kind `member_report` through an RPC).
+- `outbox`, `sync_runs`, `day_closures`, `attention_items`, `job_leases`, `drive_files`, `settings`, `people_aliases`: admin select only (members can insert `attention_items` of kind `member_report` through an RPC). `people_aliases` is written through admin server actions.
 - `holidays`, `calendar_days`: all authenticated users select; admin writes.
 
 ### 9.3 Other security rules
@@ -630,7 +631,7 @@ After a successful push, `source_snapshot` is updated to exactly what was writte
 1. Take due outbox rows (`pending`, `next_attempt_at <= now()`), newest per task wins, older ones become `superseded`. Group by tracker. Rows for paused trackers become `held`, and return to `pending` on resume.
 2. Per tracker: `readColumn(Knit ID)` to map ids to row numbers at write time. Missing id: row fails with attention `row_not_found`.
 3. Guard: never write to a column in `readOnlyColumns` or one detected as a formula column. A violation fails the row with attention `formula_column`.
-4. Build cell writes: status cell (skip if `writeBack` value is null), completed-on cell (if mapped: value on done, cleared on revert), Knit Note cell. One `batchUpdate`.
+4. Build cell writes: status cell (skip if `writeBack` value is null), completed-on cell (if mapped: value on done, cleared on revert), Knit Note cell (rendered now by `renderKnitNote` from the task's current state, 6.9). One `batchUpdate`.
 5. Re-read the written cells. On match: outbox `done`, update `source_snapshot` and `source_synced_at`. On mismatch or error: `attempts + 1`, `next_attempt_at` by backoff 1 min, 2 min, 5 min, 15 min, 60 min; after 5 attempts state `failed`, attention `write_blocked`, and the task shows an amber "Not saved to sheet" pill until it succeeds or the admin retries.
 
 ### 10.5 Close days
@@ -826,8 +827,8 @@ lib/
   time.ts                        IST helpers (single place that knows the timezone)
   env.ts                         zod-validated environment
 supabase/
-  migrations/                    ordered SQL
-  seed.sql                       holidays, calendar, settings, admin alias rows
+  migrations/                    ordered SQL, including the holiday list and the first calendar build
+  seed.sql                       local development data only: settings, admin alias rows
 tests/
   unit/                          domain + planner
   integration/                   RPCs against local Supabase

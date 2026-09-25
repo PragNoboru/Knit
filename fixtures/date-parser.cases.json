@@ -1,0 +1,286 @@
+{
+  "referenceToday": "2026-09-25",
+  "timezone": "Asia/Kolkata",
+  "notes": "Every case must pass. 'cell' is the type the value arrives as from the Sheets API (date = a real date cell, text = a string). Numeric dates are always day-first (India). Year inference when the year is missing: if a weekday is present, pick the year in {today.year-1, today.year, today.year+1} whose date falls on that weekday, choosing the one closest to today; if none match, the value is invalid. Without a weekday, pick the year that puts the date within 6 months either side of today.",
+  "cases": [
+    {
+      "cell": "date",
+      "input": "2026-09-14",
+      "expect": {
+        "kind": "single",
+        "start": "2026-09-14"
+      }
+    },
+    {
+      "cell": "text",
+      "input": "Mon 28 Sep",
+      "expect": {
+        "kind": "single",
+        "start": "2026-09-28"
+      }
+    },
+    {
+      "cell": "text",
+      "input": "Tue 29 Sep",
+      "expect": {
+        "kind": "single",
+        "start": "2026-09-29"
+      }
+    },
+    {
+      "cell": "text",
+      "input": "Wed 30 Sep",
+      "expect": {
+        "kind": "single",
+        "start": "2026-09-30"
+      }
+    },
+    {
+      "cell": "text",
+      "input": "Mon 5 Oct",
+      "expect": {
+        "kind": "single",
+        "start": "2026-10-05"
+      }
+    },
+    {
+      "cell": "text",
+      "input": "Wed 7 Oct",
+      "expect": {
+        "kind": "single",
+        "start": "2026-10-07"
+      }
+    },
+    {
+      "cell": "text",
+      "input": "Mon 12 Oct",
+      "expect": {
+        "kind": "single",
+        "start": "2026-10-12"
+      }
+    },
+    {
+      "cell": "text",
+      "input": "Wed 14 Oct",
+      "expect": {
+        "kind": "single",
+        "start": "2026-10-14"
+      }
+    },
+    {
+      "cell": "text",
+      "input": "Wed 21 Oct",
+      "expect": {
+        "kind": "single",
+        "start": "2026-10-21"
+      }
+    },
+    {
+      "cell": "text",
+      "input": "Fri 23 Oct",
+      "expect": {
+        "kind": "single",
+        "start": "2026-10-23"
+      }
+    },
+    {
+      "cell": "text",
+      "input": "1-6 Oct",
+      "expect": {
+        "kind": "window",
+        "start": "2026-10-01",
+        "end": "2026-10-06"
+      }
+    },
+    {
+      "cell": "text",
+      "input": "From 30 Oct",
+      "expect": {
+        "kind": "open",
+        "start": "2026-10-30"
+      }
+    },
+    {
+      "cell": "text",
+      "input": "  mon 28 sep  ",
+      "expect": {
+        "kind": "single",
+        "start": "2026-09-28"
+      }
+    },
+    {
+      "cell": "text",
+      "input": "28 Sep",
+      "expect": {
+        "kind": "single",
+        "start": "2026-09-28"
+      }
+    },
+    {
+      "cell": "text",
+      "input": "Sep 28",
+      "expect": {
+        "kind": "single",
+        "start": "2026-09-28"
+      }
+    },
+    {
+      "cell": "text",
+      "input": "28 September 2026",
+      "expect": {
+        "kind": "single",
+        "start": "2026-09-28"
+      }
+    },
+    {
+      "cell": "text",
+      "input": "28/09/2026",
+      "expect": {
+        "kind": "single",
+        "start": "2026-09-28"
+      }
+    },
+    {
+      "cell": "text",
+      "input": "05/10/2026",
+      "expect": {
+        "kind": "single",
+        "start": "2026-10-05"
+      },
+      "why": "day-first, never 10 May"
+    },
+    {
+      "cell": "text",
+      "input": "5/10/26",
+      "expect": {
+        "kind": "single",
+        "start": "2026-10-05"
+      }
+    },
+    {
+      "cell": "text",
+      "input": "2026-10-05",
+      "expect": {
+        "kind": "single",
+        "start": "2026-10-05"
+      }
+    },
+    {
+      "cell": "text",
+      "input": "28 Sep - 2 Oct",
+      "expect": {
+        "kind": "window",
+        "start": "2026-09-28",
+        "end": "2026-10-02"
+      }
+    },
+    {
+      "cell": "text",
+      "input": "28 Sep-2 Oct",
+      "expect": {
+        "kind": "window",
+        "start": "2026-09-28",
+        "end": "2026-10-02"
+      }
+    },
+    {
+      "cell": "text",
+      "input": "28 Sep to 2 Oct",
+      "expect": {
+        "kind": "window",
+        "start": "2026-09-28",
+        "end": "2026-10-02"
+      }
+    },
+    {
+      "cell": "text",
+      "input": "1 - 6 Oct",
+      "expect": {
+        "kind": "window",
+        "start": "2026-10-01",
+        "end": "2026-10-06"
+      }
+    },
+    {
+      "cell": "text",
+      "input": "30 Oct onwards",
+      "expect": {
+        "kind": "open",
+        "start": "2026-10-30"
+      }
+    },
+    {
+      "cell": "text",
+      "input": "from 30 oct",
+      "expect": {
+        "kind": "open",
+        "start": "2026-10-30"
+      }
+    },
+    {
+      "cell": "text",
+      "input": "Mon 4 Jan",
+      "expect": {
+        "kind": "single",
+        "start": "2027-01-04"
+      },
+      "why": "4 Jan 2027 is the Monday closest to today"
+    },
+    {
+      "cell": "text",
+      "input": "15 Jan",
+      "expect": {
+        "kind": "single",
+        "start": "2027-01-15"
+      },
+      "why": "no weekday: 15 Jan 2027 is within 6 months of today, 15 Jan 2026 is not"
+    },
+    {
+      "cell": "text",
+      "input": "Sat 28 Sep",
+      "expect": {
+        "kind": "invalid",
+        "reason": "weekday_mismatch"
+      }
+    },
+    {
+      "cell": "text",
+      "input": "31 Sep",
+      "expect": {
+        "kind": "invalid",
+        "reason": "not_a_date"
+      }
+    },
+    {
+      "cell": "text",
+      "input": "6-1 Oct",
+      "expect": {
+        "kind": "invalid",
+        "reason": "range_end_before_start"
+      }
+    },
+    {
+      "cell": "text",
+      "input": "TBD",
+      "expect": {
+        "kind": "invalid",
+        "reason": "unparseable"
+      }
+    },
+    {
+      "cell": "text",
+      "input": "Week 3",
+      "expect": {
+        "kind": "invalid",
+        "reason": "unparseable"
+      }
+    },
+    {
+      "cell": "empty",
+      "input": "",
+      "expect": {
+        "kind": "empty"
+      }
+    }
+  ]
+}

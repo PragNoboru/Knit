@@ -1,0 +1,374 @@
+{
+  "notes": "Registry configs for the four example trackers, as the setup wizard would save them. Used as test fixtures and as starting configs. Headers are matched after trim + lowercase + whitespace collapse. Status keys are normalised the same way. A writeBack value of null means 'never write this status to the sheet; show it only in the Knit Note'. An empty string means 'clear the cell'. Items in statusMapPending must be completed in the wizard from the live sheet's dropdown rule before activation.",
+  "referenceToday": "2026-09-25",
+  "people": [
+    {
+      "alias": "Pragaman",
+      "user": "pragaman@noboruworld.com"
+    },
+    {
+      "alias": "P",
+      "user": "pragaman@noboruworld.com"
+    },
+    {
+      "alias": "Shlok",
+      "user": null
+    },
+    {
+      "alias": "Anjan",
+      "user": null
+    },
+    {
+      "alias": "Aryan",
+      "user": null
+    },
+    {
+      "alias": "Agent",
+      "user": null
+    },
+    {
+      "alias": "Creative",
+      "user": null
+    },
+    {
+      "alias": "Sales",
+      "user": null
+    }
+  ],
+  "trackers": [
+    {
+      "fixture": "fixtures/trackers/Filing_Buddy_Google_Ads_Tracker.xlsx",
+      "tab": "Copy of Google",
+      "name": "Filing Buddy · Google Ads",
+      "color": "amber",
+      "phase": 1,
+      "headerRow": 1,
+      "columns": {
+        "date": "Date",
+        "title": "Task",
+        "statusRead": "Status",
+        "statusWrite": "Status",
+        "completedOn": "Done on",
+        "owner": "Owner",
+        "sourceRef": "ID",
+        "critical": {
+          "header": "Blocks go-live?",
+          "truthy": [
+            "Yes"
+          ]
+        }
+      },
+      "readOnlyColumns": [],
+      "titleTemplate": "{Task}",
+      "subtitleTemplate": "{ID} · {Phase}",
+      "detailColumns": [
+        "Details / done when",
+        "Depends on",
+        "Ref",
+        "Notes"
+      ],
+      "ownerSeparators": [
+        ",",
+        "+"
+      ],
+      "ownerFilter": "mine",
+      "offDayPolicy": "previous_working_day",
+      "statusMap": {
+        "not started": "yet_to_start",
+        "in progress": "in_progress",
+        "blocked": "blocked",
+        "done": "done",
+        "cancelled": "cancelled",
+        "skipped": "cancelled"
+      },
+      "statusMapPending": [],
+      "writeBack": {
+        "yet_to_start": "Not started",
+        "in_progress": "In progress",
+        "blocked": "Blocked",
+        "done": "Done",
+        "cancelled": "Cancelled"
+      },
+      "completedOnFormat": {
+        "type": "text",
+        "pattern": "EEE d MMM"
+      },
+      "expected": {
+        "rows": 34,
+        "myRows": 34,
+        "kinds": {
+          "single": 32,
+          "window": 1,
+          "open": 1
+        },
+        "offDayRows": 0,
+        "unmappedStatuses": []
+      }
+    },
+    {
+      "fixture": "fixtures/trackers/Filing_Buddy_Meta_Ads_Tracker.xlsx",
+      "tab": "Copy of Meta",
+      "name": "Filing Buddy · Meta Ads",
+      "color": "sky",
+      "phase": 2,
+      "headerRow": 1,
+      "columns": {
+        "date": "Date",
+        "title": "Task",
+        "statusRead": "Status",
+        "statusWrite": "Status",
+        "completedOn": "Done on",
+        "owner": "Owner",
+        "sourceRef": "ID",
+        "critical": {
+          "header": "Blocks go-live?",
+          "truthy": [
+            "Yes"
+          ]
+        }
+      },
+      "readOnlyColumns": [],
+      "titleTemplate": "{Task}",
+      "subtitleTemplate": "{ID} · {Phase}",
+      "detailColumns": [
+        "Details / done when",
+        "Depends on",
+        "Ref",
+        "Notes"
+      ],
+      "ownerSeparators": [
+        ",",
+        "+"
+      ],
+      "ownerFilter": "mine",
+      "offDayPolicy": "previous_working_day",
+      "statusMap": {
+        "not started": "yet_to_start",
+        "in progress": "in_progress",
+        "blocked": "blocked",
+        "done": "done",
+        "cancelled": "cancelled",
+        "skipped": "cancelled"
+      },
+      "statusMapPending": [],
+      "writeBack": {
+        "yet_to_start": "Not started",
+        "in_progress": "In progress",
+        "blocked": "Blocked",
+        "done": "Done",
+        "cancelled": "Cancelled"
+      },
+      "completedOnFormat": {
+        "type": "text",
+        "pattern": "EEE d MMM"
+      },
+      "expected": {
+        "rows": 23,
+        "myRows": 20,
+        "notMine": {
+          "Creative": 2,
+          "Sales": 1
+        },
+        "kinds": {
+          "single": 21,
+          "window": 1,
+          "open": 1
+        },
+        "unmappedStatuses": []
+      }
+    },
+    {
+      "fixture": "fixtures/trackers/Noboru_CA_Campaign_test_example.xlsx",
+      "tab": "Tasks",
+      "name": "Noboru · CA Campaign",
+      "color": "indigo",
+      "phase": 2,
+      "headerRow": 1,
+      "columns": {
+        "date": "Date",
+        "title": "Task",
+        "statusRead": "Done",
+        "statusWrite": "Done",
+        "completedOn": null,
+        "owner": "Owner",
+        "sourceRef": null,
+        "critical": {
+          "header": "Critical path",
+          "truthy": [
+            "Yes"
+          ]
+        }
+      },
+      "readOnlyColumns": [
+        "Day",
+        "Status"
+      ],
+      "titleTemplate": "{Task}",
+      "subtitleTemplate": "{Type}",
+      "detailColumns": [
+        "Notes"
+      ],
+      "ownerSeparators": [
+        ","
+      ],
+      "ownerFilter": "mine",
+      "offDayPolicy": "previous_working_day",
+      "statusMap": {
+        "": "yet_to_start",
+        "no": "yet_to_start",
+        "yes": "done",
+        "not needed": "cancelled",
+        "moved": "cancelled"
+      },
+      "statusMapPending": [],
+      "cancelReasons": {
+        "moved": "Moved in source",
+        "not needed": "Not needed"
+      },
+      "writeBack": {
+        "yet_to_start": "",
+        "in_progress": null,
+        "blocked": null,
+        "done": "Yes",
+        "cancelled": "Not needed"
+      },
+      "completedOnFormat": null,
+      "expected": {
+        "rows": 191,
+        "myRows": 136,
+        "offDayRows": 22,
+        "offDayExamples": [
+          {
+            "planned": "2026-10-02",
+            "plannedDay": "Fri",
+            "due": "2026-10-01",
+            "dueDay": "Thu"
+          },
+          {
+            "planned": "2026-10-11",
+            "plannedDay": "Sun",
+            "due": "2026-10-09",
+            "dueDay": "Fri"
+          },
+          {
+            "planned": "2026-10-20",
+            "plannedDay": "Tue",
+            "due": "2026-10-19",
+            "dueDay": "Mon"
+          },
+          {
+            "planned": "2026-10-31",
+            "plannedDay": "Sat",
+            "due": "2026-10-30",
+            "dueDay": "Fri"
+          },
+          {
+            "planned": "2026-11-01",
+            "plannedDay": "Sun",
+            "due": "2026-10-30",
+            "dueDay": "Fri"
+          }
+        ],
+        "formulaColumns": [
+          "Day",
+          "Status"
+        ],
+        "unmappedStatuses": []
+      }
+    },
+    {
+      "fixture": "fixtures/trackers/Sapiens_Example_Tracker.xlsx",
+      "tab": "Calendar",
+      "name": "Sapiens · Content Calendar",
+      "color": "emerald",
+      "phase": 2,
+      "headerRow": 1,
+      "columns": {
+        "date": "Date",
+        "title": "Working title",
+        "statusRead": "Status",
+        "statusWrite": "Status",
+        "completedOn": "Posted on",
+        "owner": "Owner",
+        "sourceRef": "Asset ID",
+        "critical": null
+      },
+      "readOnlyColumns": [
+        "Day",
+        "Week"
+      ],
+      "titleTemplate": "{Asset ID} · {Working title}",
+      "subtitleTemplate": "{Platform} · {Format}",
+      "detailColumns": [
+        "Pillar",
+        "Hook (first line)",
+        "Caption",
+        "CTA",
+        "Hashtag set",
+        "Canva / video link",
+        "Notes",
+        "Week"
+      ],
+      "ownerSeparators": [
+        ","
+      ],
+      "ownerFilter": "mine",
+      "offDayPolicy": "previous_working_day",
+      "statusMap": {
+        "not started": "yet_to_start",
+        "copy ready": "in_progress"
+      },
+      "statusMapPending": [
+        "The other 5 options of the Status dropdown (validation range Lists!A2:A8) are not in the export and must be mapped in the wizard."
+      ],
+      "writeBack": {
+        "yet_to_start": "Not started",
+        "in_progress": "Copy ready",
+        "blocked": null,
+        "done": "PENDING_WIZARD",
+        "cancelled": "PENDING_WIZARD"
+      },
+      "completedOnFormat": {
+        "type": "date"
+      },
+      "expected": {
+        "rows": 96,
+        "myRows": 96,
+        "offDayRows": 32,
+        "offDayExamples": [
+          {
+            "planned": "2026-10-24",
+            "plannedDay": "Sat",
+            "due": "2026-10-23",
+            "dueDay": "Fri"
+          },
+          {
+            "planned": "2026-10-25",
+            "plannedDay": "Sun",
+            "due": "2026-10-23",
+            "dueDay": "Fri"
+          },
+          {
+            "planned": "2026-10-31",
+            "plannedDay": "Sat",
+            "due": "2026-10-30",
+            "dueDay": "Fri"
+          },
+          {
+            "planned": "2026-11-01",
+            "plannedDay": "Sun",
+            "due": "2026-10-30",
+            "dueDay": "Fri"
+          },
+          {
+            "planned": "2026-11-08",
+            "plannedDay": "Sun",
+            "due": "2026-11-07",
+            "dueDay": "Sat"
+          }
+        ],
+        "unmappedStatuses": []
+      }
+    }
+  ]
+}

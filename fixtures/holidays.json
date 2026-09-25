@@ -1,0 +1,45 @@
+{
+  "source": "Provided by Pragaman on 25 Sep 2026. The list covers Apr 2026 to Mar 2027 (India FY 2026-27), so the January and March entries are dated 2027.",
+  "holidays": [
+    {
+      "date": "2026-04-14",
+      "name": "Ambedkar Jayanti"
+    },
+    {
+      "date": "2026-05-01",
+      "name": "Labour Day"
+    },
+    {
+      "date": "2026-08-15",
+      "name": "Independence Day"
+    },
+    {
+      "date": "2026-09-14",
+      "name": "Ganesh Chaturthi"
+    },
+    {
+      "date": "2026-10-02",
+      "name": "Gandhi Jayanti"
+    },
+    {
+      "date": "2026-10-20",
+      "name": "Dussehra"
+    },
+    {
+      "date": "2026-11-08",
+      "name": "Diwali"
+    },
+    {
+      "date": "2027-01-01",
+      "name": "New Year (Hangover Day)"
+    },
+    {
+      "date": "2027-01-26",
+      "name": "Republic Day"
+    },
+    {
+      "date": "2027-03-22",
+      "name": "Holi"
+    }
+  ]
+}

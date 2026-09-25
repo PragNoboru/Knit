@@ -1,0 +1,7 @@
+# The spec pack and fixtures are kept exactly as supplied.
+CLAUDE.md
+docs/
+fixtures/
+
+pnpm-lock.yaml
+next-env.d.ts

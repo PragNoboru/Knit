@@ -4,6 +4,8 @@ The four files in `fixtures/trackers/` are real examples supplied by Pragaman on
 
 The point of this document: the four trackers differ in ways that break naive sync. Every difference below is handled by configuration, not by tracker-specific code.
 
+These files show the shapes live trackers take; they are not the live trackers. Expect other layouts too: each new quirk is handled as a general case and gets its own fixture test. The exports also leave out tabs that the sheets reference (the `Lists` tab behind the Noboru and Sapiens dropdowns), so test copies must be made from the live Google Sheets, not converted from these files.
+
 ## At a glance
 
 | | Filing Buddy Google Ads | Filing Buddy Meta Ads | Noboru CA Campaign | Sapiens Content Calendar |
@@ -33,7 +35,7 @@ The point of this document: the four trackers differ in ways that break naive sy
 - Dates are text with no year: "Mon 28 Sep", "Tue 29 Sep", "Wed 30 Sep", "Mon 5 Oct", "Wed 14 Oct", "Fri 23 Oct". The weekday validates the inferred year (2026).
 - "1-6 Oct" (G30 Daily watch) is a window: Ongoing from Thu 1 Oct, due Tue 6 Oct. Fri 2 Oct is a holiday and Sun 4 Oct is off; it simply stays in Ongoing on working days.
 - "From 30 Oct" (G34 Offline conversions) is open-ended: Ongoing from Fri 30 Oct, never spills.
-- Every row currently says "Not started". The wizard should standardise the dropdown to: Not started, In progress, Blocked, Done, Cancelled (PRD Q4).
+- Every row currently says "Not started". The export's Status dropdown is "Not started, In progress, Done, Blocked, Skipped". Pragaman standardises it in the sheet to: Not started, In progress, Blocked, Done, Cancelled (PRD Q4, resolved). Knit never edits dropdowns; "Skipped" is still read as Cancelled.
 - `Depends on` references IDs, sometimes in other trackers (G21 is referenced by Meta M14) or outside Knit (T1 to T4). Shown as text in the drawer in v1.
 - `Done on` is written as text in the tracker's own style ("Mon 28 Sep").
 

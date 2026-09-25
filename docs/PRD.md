@@ -107,7 +107,7 @@ Status: **Adopted** = settled. **Default** = adopted as the default because the 
 | D14 | Single source boundary | Only sheets inside the Knit folder are synced | Adopted |
 | D15 | Hosting | Supabase, GitHub and Vercel all under pragaman@noboruworld.com | Adopted |
 | N1 | Tasks planned on an off day | `offDayPolicy` per tracker. Default `previous_working_day` (a Sunday post is due on the last working day before it). Other values: `next_working_day`, `keep` | Default |
-| N2 | 5th Saturdays | Off. Only the 1st and 3rd Saturdays are working days (affects 31 Oct 2026 and 30 Jan 2027) | Default, confirm |
+| N2 | 5th Saturdays | Off. Only the 1st and 3rd Saturdays are working days (affects 31 Oct 2026 and 30 Jan 2027) | Adopted |
 | N3 | Rows owned by others | `ownerFilter: "mine"`: only rows whose owner cell contains one of the user's aliases are assigned to them. Other rows are synced and visible in All Tasks with the Everyone toggle, but never on Today | Default |
 | N4 | Date ranges and open dates | "1-6 Oct" is a window: shown under Ongoing from its first working day, due on its last, spills after. "From 30 Oct" is open-ended: shown under Ongoing from that date, never spills | Default |
 | N5 | Noboru "Moved" | Treated as Cancelled with reason "Moved in source". No spill | Default, confirm |
@@ -907,10 +907,10 @@ Phases, milestones and acceptance criteria are in `docs/SOW.md`. Summary: Phase 
 ---
 
 ## 21. Open questions
-| # | Question | Needed by |
-| --- | --- | --- |
-| Q1 | Confirm N2: are 5th Saturdays off? (31 Oct 2026) | Before Phase 1 go-live |
-| Q2 | Confirm N5: does "Moved" in the Noboru tracker mean the task is closed on this row? | Phase 2 Noboru setup |
-| Q3 | The full list of Sapiens Status options (Lists!A2:A8) and which one means done | Phase 2 Sapiens setup (the wizard reads it) |
-| Q4 | Filing Buddy trackers: confirm the status words to standardise on (Not started, In progress, Blocked, Done, Cancelled) | Phase 1 setup |
-| Q5 | Auxman tracker layout | On arrival, 2 or 3 Oct |
+| # | Question | Needed by | Status |
+| --- | --- | --- | --- |
+| Q1 | Confirm N2: are 5th Saturdays off? (31 Oct 2026) | Before Phase 1 go-live | Resolved 25 Sep 2026: yes, 5th Saturdays are off. N2 adopted |
+| Q2 | Confirm N5: does "Moved" in the Noboru tracker mean the task is closed on this row? | Phase 2 Noboru setup | Open |
+| Q3 | The full list of Sapiens Status options (Lists!A2:A8) and which one means done | Phase 2 Sapiens setup (the wizard reads it) | Open |
+| Q4 | Filing Buddy trackers: confirm the status words to standardise on (Not started, In progress, Blocked, Done, Cancelled) | Phase 1 setup | Resolved 25 Sep 2026: yes. Pragaman sets these five words as the Status dropdown in the Filing Buddy sheets himself; Knit never edits dropdowns (SOW 4.2). "Skipped" stays mapped to Cancelled when read |
+| Q5 | Auxman tracker layout | On arrival, 2 or 3 Oct | Open |

@@ -202,3 +202,24 @@ describe("refresh_calendar and holidays (PRD 6.2, 9.1, 9.2)", () => {
     expect(rows[0]).toEqual({ n: 10 });
   });
 });
+
+describe("TypeScript calendar rules match the database (PRD 6.2)", () => {
+  const db = useTestDb();
+
+  it("agree on every day of 2026 and 2027", async () => {
+    const { calendarDaysFromRules } = await import("@/lib/domain/calendar");
+    const holidays = await db().query<{ date: string; name: string }>(
+      "select day::text as date, name from holidays order by day",
+    );
+    const fromDb = await db().query<{
+      day: string;
+      isWorking: boolean;
+      reason: string | null;
+    }>(
+      `select day::text, is_working as "isWorking", reason from calendar_days order by day`,
+    );
+    expect(calendarDaysFromRules(holidays, "2026-01-01", "2027-12-31")).toEqual(
+      fromDb,
+    );
+  });
+});

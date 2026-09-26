@@ -1,0 +1,173 @@
+import { fromSheetsSerial, type LocalDate } from "@/lib/time";
+
+import { CalendarNotCoveredError, type WorkingCalendar } from "./calendar";
+import { normaliseKey, type TrackerConfig } from "./config";
+import {
+  normaliseDateText,
+  parseDateText,
+  parsePlannedDate,
+  type CellValue,
+  type ParsedDate,
+} from "./dates";
+import { dueDateFor, plannedDueSource } from "./due-date";
+import { assigneesFor, type AliasMap } from "./owners";
+import { mapSourceStatus, type SourceStatus } from "./status";
+import { renderTemplate, templateHeaders } from "./templates";
+
+/**
+ * PRD 10.2 step 5: a sheet row turned into what the planner needs. Pure; `today` is a
+ * parameter.
+ */
+
+/** A data row as SheetSource.readRows returns it: cells keyed by normalised header. */
+export interface SheetRow {
+  rowNumber: number;
+  cells: Record<string, CellValue>;
+}
+
+/** What Knit last read from, or wrote to, the status and completed-on columns (10.3). */
+export interface SourceSnapshot {
+  statusKey: string;
+  completedOn: LocalDate | null;
+}
+
+export interface NormalisedRow {
+  knitId: string;
+  rowNumber: number;
+  title: string;
+  subtitle: string | null;
+  details: Record<string, string>;
+  sourceRef: string | null;
+  critical: boolean;
+  ownerRaw: string | null;
+  assignees: string[];
+  unknownOwners: string[];
+  plannedRaw: string;
+  date: ParsedDate;
+  /** Null for open-ended, invalid or empty dates, and when the calendar does not cover it. */
+  dueDate: LocalDate | null;
+  /** The planned date fell on an off day and the due date moved (6.3.3). */
+  offDayMove: boolean;
+  /** The due date could not be computed because the calendar does not cover the date. */
+  outsideCalendar: boolean;
+  statusRaw: string;
+  status: SourceStatus;
+  completedOn: LocalDate | null;
+  snapshot: SourceSnapshot;
+}
+
+export interface RowContext {
+  config: TrackerConfig;
+  calendar: WorkingCalendar;
+  aliases: AliasMap;
+  trackerOwnerId: string | null;
+  today: LocalDate;
+  knitIdHeader: string;
+}
+
+const EMPTY: CellValue = { value: null, formatted: "" };
+
+export function cellOf(row: SheetRow, header: string): CellValue {
+  return row.cells[normaliseKey(header)] ?? EMPTY;
+}
+
+export function textOf(cell: CellValue): string {
+  if (cell.formatted !== "") return cell.formatted.trim();
+  return cell.value === null ? "" : String(cell.value).trim();
+}
+
+/** Headers that decide whether a row has any content (10.2 step 3). */
+export function contentHeaders(config: TrackerConfig): string[] {
+  const { columns } = config;
+  return [
+    columns.date,
+    columns.title,
+    columns.statusRead,
+    ...(columns.owner ? [columns.owner] : []),
+    ...(columns.sourceRef ? [columns.sourceRef] : []),
+    ...templateHeaders(config.titleTemplate),
+  ];
+}
+
+/** 10.2 step 3: rows empty in every mapped column are ignored. */
+export function isEmptyRow(row: SheetRow, config: TrackerConfig): boolean {
+  return contentHeaders(config).every(
+    (header) => textOf(cellOf(row, header)) === "",
+  );
+}
+
+function parseCompletedOn(cell: CellValue, today: LocalDate): LocalDate | null {
+  if (typeof cell.value === "number" && Number.isFinite(cell.value)) {
+    return fromSheetsSerial(cell.value);
+  }
+  const parsed = parseDateText(normaliseDateText(textOf(cell)), today);
+  return parsed.kind === "single" ? parsed.start : null;
+}
+
+export function normaliseRow(row: SheetRow, ctx: RowContext): NormalisedRow {
+  const { config, calendar, aliases, today } = ctx;
+  const { columns } = config;
+  const text = (header: string) => textOf(cellOf(row, header));
+  const lookup = (normalisedHeader: string) =>
+    textOf(row.cells[normalisedHeader] ?? EMPTY);
+
+  const dateCell = cellOf(row, columns.date);
+  const date = parsePlannedDate(dateCell, today);
+  let dueDate: LocalDate | null = null;
+  let outsideCalendar = false;
+  try {
+    dueDate = dueDateFor(date, config.offDayPolicy, calendar);
+  } catch (error) {
+    if (!(error instanceof CalendarNotCoveredError)) throw error;
+    outsideCalendar = true;
+  }
+  const planned = plannedDueSource(date);
+
+  const owners = assigneesFor(
+    columns.owner ? text(columns.owner) : null,
+    config,
+    aliases,
+    ctx.trackerOwnerId,
+  );
+
+  const statusRaw = text(columns.statusRead);
+  const status = mapSourceStatus(statusRaw, config);
+  const completedOn = columns.completedOn
+    ? parseCompletedOn(cellOf(row, columns.completedOn), today)
+    : null;
+
+  const details: Record<string, string> = {};
+  for (const header of config.detailColumns) {
+    const value = text(header);
+    if (value !== "") details[header] = value;
+  }
+
+  const truthy = new Set((columns.critical?.truthy ?? []).map(normaliseKey));
+  const subtitle = config.subtitleTemplate
+    ? renderTemplate(config.subtitleTemplate, lookup)
+    : "";
+
+  return {
+    knitId: text(ctx.knitIdHeader),
+    rowNumber: row.rowNumber,
+    title: renderTemplate(config.titleTemplate, lookup) || text(columns.title),
+    subtitle: subtitle === "" ? null : subtitle,
+    details,
+    sourceRef: columns.sourceRef ? text(columns.sourceRef) || null : null,
+    critical: columns.critical
+      ? truthy.has(normaliseKey(text(columns.critical.header)))
+      : false,
+    ownerRaw: columns.owner ? text(columns.owner) || null : null,
+    assignees: owners.userIds,
+    unknownOwners: owners.unknown,
+    plannedRaw: textOf(dateCell),
+    date,
+    dueDate,
+    offDayMove: dueDate !== null && planned !== null && dueDate !== planned,
+    outsideCalendar,
+    statusRaw,
+    status,
+    completedOn,
+    snapshot: { statusKey: status.key, completedOn },
+  };
+}

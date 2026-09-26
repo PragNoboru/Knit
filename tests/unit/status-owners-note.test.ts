@@ -1,0 +1,260 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
+import { describe, expect, it } from "vitest";
+
+import { TrackerConfig } from "@/lib/domain/config";
+import {
+  renderKnitNote,
+  type NoteTask,
+  type NoteTaskDay,
+} from "@/lib/domain/note";
+import { aliasMap, assigneesFor, splitOwners } from "@/lib/domain/owners";
+import { mapSourceStatus, writeBackFor } from "@/lib/domain/status";
+import { renderTemplate } from "@/lib/domain/templates";
+
+const trackers = (
+  JSON.parse(
+    readFileSync(
+      fileURLToPath(
+        new URL("../../fixtures/trackers.config.json", import.meta.url),
+      ),
+      "utf8",
+    ),
+  ) as { trackers: Record<string, unknown>[] }
+).trackers;
+const configOf = (name: string) =>
+  TrackerConfig.parse(trackers.find((t) => t.name === name));
+const googleAds = configOf("Filing Buddy · Google Ads");
+const noboru = configOf("Noboru · CA Campaign");
+
+describe("tracker configs (PRD 8.2)", () => {
+  it("the fixture configs of all four trackers are valid registries", () => {
+    for (const t of trackers) {
+      const result = TrackerConfig.safeParse(t);
+      expect(result.success, String(t.name)).toBe(true);
+    }
+  });
+});
+
+describe("status mapping (PRD 6.8, N8)", () => {
+  it("maps source words, normalised", () => {
+    expect(mapSourceStatus("  In Progress ", googleAds)).toMatchObject({
+      status: "in_progress",
+      mapped: true,
+    });
+    expect(mapSourceStatus("Skipped", googleAds)).toMatchObject({
+      status: "cancelled",
+      mapped: true,
+    });
+  });
+
+  it("maps a blank cell through the blank key", () => {
+    expect(mapSourceStatus("", noboru)).toMatchObject({
+      status: "yet_to_start",
+      mapped: true,
+      key: "",
+    });
+    expect(mapSourceStatus(null, noboru)).toMatchObject({
+      status: "yet_to_start",
+      mapped: true,
+    });
+  });
+
+  it("treats an unmapped word as Yet to Start, never Done", () => {
+    expect(mapSourceStatus("Copy ready", googleAds)).toMatchObject({
+      status: "yet_to_start",
+      mapped: false,
+      key: "copy ready",
+    });
+  });
+
+  it("carries cancel reasons (Noboru Moved, N5)", () => {
+    expect(mapSourceStatus("Moved", noboru)).toMatchObject({
+      status: "cancelled",
+      cancelReason: "Moved in source",
+    });
+  });
+
+  it("gives write-back words; null leaves the cell alone, empty clears it", () => {
+    expect(writeBackFor("done", googleAds)).toBe("Done");
+    expect(writeBackFor("in_progress", noboru)).toBeNull();
+    expect(writeBackFor("yet_to_start", noboru)).toBe("");
+  });
+});
+
+describe("owners (PRD 6.7, N3)", () => {
+  const PRAGAMAN = "user-pragaman";
+  const aliases = aliasMap([
+    { aliasNorm: "pragaman", userId: PRAGAMAN },
+    { aliasNorm: "p", userId: PRAGAMAN },
+    { aliasNorm: "agent", userId: null },
+    { aliasNorm: "shlok", userId: null },
+    { aliasNorm: "anjan", userId: null },
+  ]);
+
+  it("splits on the tracker's separators", () => {
+    expect(splitOwners("P + Agent", [",", "+"])).toEqual(["p", "agent"]);
+    expect(splitOwners("Anjan, Shlok, Pragaman", [","])).toEqual([
+      "anjan",
+      "shlok",
+      "pragaman",
+    ]);
+  });
+
+  it("assigns matching users, ignores known non-users, reports unknown names", () => {
+    expect(assigneesFor("P + Agent", googleAds, aliases, null)).toEqual({
+      userIds: [PRAGAMAN],
+      unknown: [],
+    });
+    expect(
+      assigneesFor("Anjan, Shlok, Pragaman", noboru, aliases, null),
+    ).toEqual({ userIds: [PRAGAMAN], unknown: [] });
+    expect(assigneesFor("Creative", googleAds, aliases, null)).toEqual({
+      userIds: [],
+      unknown: ["creative"],
+    });
+  });
+
+  it("assigns every task to the tracker owner when there is no owner column", () => {
+    const noOwner = {
+      ...googleAds,
+      columns: { ...googleAds.columns, owner: null },
+    };
+    expect(assigneesFor("anything", noOwner, aliases, "owner-1")).toEqual({
+      userIds: ["owner-1"],
+      unknown: [],
+    });
+  });
+});
+
+describe("templates (PRD 8.2)", () => {
+  const row: Record<string, string> = {
+    "asset id": "REEL-01",
+    "working title": "Bring one neighbour",
+    id: "G01",
+  };
+  const lookup = (header: string) => row[header];
+
+  it("renders fields with their separators", () => {
+    expect(renderTemplate("{Asset ID} · {Working title}", lookup)).toBe(
+      "REEL-01 · Bring one neighbour",
+    );
+  });
+
+  it("collapses the separator next to a missing value", () => {
+    expect(renderTemplate("{ID} · {Phase}", lookup)).toBe("G01");
+    expect(renderTemplate("{Phase} · {ID}", lookup)).toBe("G01");
+    expect(renderTemplate("{Phase} · {Type}", lookup)).toBe("");
+  });
+});
+
+describe("renderKnitNote (PRD 6.9): every row of the table", () => {
+  const TODAY = "2026-10-05";
+  const task = (over: Partial<NoteTask>): NoteTask => ({
+    status: "yet_to_start",
+    statusReason: null,
+    completedOn: null,
+    dueDate: "2026-09-30",
+    historyOnly: false,
+    ...over,
+  });
+  const day = (
+    d: string,
+    spillIndex: number,
+    locked: boolean,
+    status: NoteTaskDay["status"] = "not_done",
+  ): NoteTaskDay => ({
+    day: d,
+    spillIndex,
+    locked,
+    status,
+  });
+  const spilled = [
+    day("2026-09-30", 0, true),
+    day("2026-10-01", 1, true),
+    day("2026-10-05", 2, false, "in_progress"),
+  ];
+
+  it.each<[string, NoteTask, NoteTaskDay[], string]>([
+    [
+      "open, never spilled",
+      task({}),
+      [day("2026-10-05", 0, false, "yet_to_start")],
+      "",
+    ],
+    [
+      "open, never spilled, in progress",
+      task({ status: "in_progress" }),
+      [day("2026-10-05", 0, false)],
+      "In progress",
+    ],
+    [
+      "open, never spilled, blocked",
+      task({ status: "blocked", statusReason: "Waiting for GTM" }),
+      [day("2026-10-05", 0, false)],
+      "Blocked: Waiting for GTM",
+    ],
+    ["open, spilled", task({}), spilled, "Spilled 2x · now due Mon 5 Oct"],
+    [
+      "open, spilled, in progress",
+      task({ status: "in_progress" }),
+      spilled,
+      "Spilled 2x · now due Mon 5 Oct · In progress",
+    ],
+    [
+      "open, spilled, blocked",
+      task({ status: "blocked", statusReason: "Agency" }),
+      spilled,
+      "Spilled 2x · now due Mon 5 Oct · Blocked: Agency",
+    ],
+    [
+      "done on time",
+      task({ status: "done", completedOn: "2026-09-30" }),
+      [day("2026-09-30", 0, true, "done")],
+      "Done on Wed 30 Sep",
+    ],
+    [
+      "done after spills (PRD 6.4 example)",
+      task({ status: "done", completedOn: "2026-10-05" }),
+      [day("2026-10-05", 3, false, "done")],
+      "Done on Mon 5 Oct · after 3 spills",
+    ],
+    [
+      "done early",
+      task({
+        status: "done",
+        completedOn: "2026-09-24",
+        dueDate: "2026-09-30",
+      }),
+      [day("2026-09-30", 0, false, "done")],
+      "Done early on Thu 24 Sep · planned Wed 30 Sep",
+    ],
+    [
+      "cancelled",
+      task({ status: "cancelled", statusReason: "Moved in source" }),
+      [],
+      "Cancelled: Moved in source",
+    ],
+    [
+      "history only",
+      task({ historyOnly: true, status: "in_progress" }),
+      [],
+      "Before Knit go-live",
+    ],
+  ])("%s", (_state, t, days, expected) => {
+    expect(renderKnitNote(t, days, TODAY)).toBe(expected);
+  });
+
+  it("stays within 80 characters by shortening the reason", () => {
+    const note = renderKnitNote(
+      task({ status: "blocked", statusReason: "x".repeat(140) }),
+      spilled,
+      TODAY,
+    );
+    expect(note.length).toBe(80);
+    expect(note.startsWith("Spilled 2x · now due Mon 5 Oct · Blocked: x")).toBe(
+      true,
+    );
+  });
+});

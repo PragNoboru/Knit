@@ -161,7 +161,9 @@ Auxman arrives on 2 or 3 October, during Phase 1. It is connected in Phase 2; no
 | Scope creep during build | Delay | Change control (section 13) |
 
 ## 12. Acceptance and sign-off
-At the end of each phase Claude Code presents: the checklist of acceptance criteria with evidence (test output, screenshots, sync health numbers), known issues, and the list of PRD sections implemented. Pragaman signs off in the repository by approving a pull request titled `Phase N acceptance`.
+At the end of each phase Claude Code presents: the checklist of acceptance criteria with evidence (test output, screenshots, sync health numbers), known issues, and the list of PRD sections implemented. Pragaman signs off in the chat, and Claude Code records the sign-off in the repository as a commit titled `Phase N acceptance` that holds the checklist.
+
+Git is Claude Code's job end to end (decided 26 Sep 2026): it commits, pushes and merges into `main` from the terminal, one branch per milestone, merged once CI is green and Pragaman has given the go-ahead in the chat. Pragaman never needs to open GitHub.
 
 ## 13. Change control
 Any change to behaviour is first written into `docs/PRD.md` (decisions log or the relevant section) in its own commit, then implemented. Claude Code does not implement behaviour that is not in the PRD; it asks and proposes the PRD change instead.

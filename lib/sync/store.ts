@@ -1,6 +1,7 @@
 import type { CalendarDay } from "@/lib/domain/calendar";
 import { TrackerConfig } from "@/lib/domain/config";
 import type { PlanTask, PullPlan } from "@/lib/domain/planPull";
+import type { SourceSnapshot } from "@/lib/domain/rows";
 import type { DriveFile } from "@/lib/sheets/types";
 import type { LocalDate } from "@/lib/time";
 
@@ -71,6 +72,15 @@ export interface SyncStore {
     kind: string,
     dedupeKey: string,
     detail: Record<string, unknown>,
+  ): Promise<void>;
+  /** PRD 10.4: claims due write-backs (see push_claim). */
+  pushClaim(limit: number, taskId: string | null): Promise<unknown[]>;
+  pushResult(
+    outboxId: string,
+    ok: boolean,
+    snapshot: SourceSnapshot | null,
+    error: string | null,
+    statusRaw?: string | null,
   ): Promise<void>;
   /** PRD 7.3: the holder id, or null when another call holds the job's lease. */
   acquireLease(job: string, ttlSeconds: number): Promise<string | null>;
@@ -163,6 +173,20 @@ export function createSyncStore(rpc: Rpc): SyncStore {
         p_kind: kind,
         p_dedupe_key: dedupeKey,
         p_detail: detail,
+      });
+    },
+    pushClaim: async (limit, taskId) =>
+      (await rpc("push_claim", {
+        p_limit: limit,
+        p_task_id: taskId,
+      })) as unknown[],
+    pushResult: async (outboxId, ok, snapshot, error, statusRaw = null) => {
+      await rpc("push_result", {
+        p_outbox_id: outboxId,
+        p_ok: ok,
+        p_snapshot: snapshot,
+        p_error: error,
+        p_status_raw: statusRaw,
       });
     },
     acquireLease: async (job, ttlSeconds) => {

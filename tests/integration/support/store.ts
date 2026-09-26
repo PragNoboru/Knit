@@ -46,6 +46,16 @@ const SIGNATURES: Record<
       p_detail: "jsonb",
     },
   },
+  push_claim: { args: { p_limit: "integer", p_task_id: "uuid" } },
+  push_result: {
+    args: {
+      p_outbox_id: "bigint",
+      p_ok: "boolean",
+      p_snapshot: "jsonb",
+      p_error: "text",
+      p_status_raw: "text",
+    },
+  },
   acquire_lease: {
     args: { p_job: "text", p_ttl_seconds: "integer" },
     returns: "text",

@@ -1,0 +1,3 @@
+-- Local development data only (PRD 16); `pnpm db:reset` loads it after the migrations.
+-- Holidays and the calendar come from migrations, so every environment has them.
+-- The first admin is created with `pnpm bootstrap:admin` (PRD 18.4), not here.

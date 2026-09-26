@@ -114,6 +114,13 @@ Status: **Adopted** = settled. **Default** = adopted as the default because the 
 | N6 | Formula columns | Knit never writes to a column whose data cells contain formulas. Such columns can be read, not mapped as a write target | Adopted |
 | N7 | Row identity | Knit always adds its own Knit ID column, even where a tracker has its own ID (G01, REEL-01). The tracker's ID is kept as `sourceRef` for display | Adopted |
 | N8 | Statuses a tracker cannot express | If `writeBack[status]` is null, Knit leaves the status cell unchanged and shows the status only in the Knit Note | Adopted |
+| N9 | Open-ended tasks and statuses | Setting Done or Cancelled on an open-ended task creates its completion task-day on today (6.5). Yet to Start, In Progress and Blocked stay on the task only, so it never spills (N4). A completion task-day changed back the same day locks at close as it is, never as Not Done | Default |
+| N10 | Changes before a day is closed | Between midnight and the day's close, a task whose open task-day is still on the previous day cannot be changed: `set_task_status` refuses with `day_not_closed` until the close runs (it retries every 15 minutes, 10.5) | Default |
+| N11 | Rows removed at source | A task removed at source cannot be changed in Knit (`task_removed_at_source`): there is no row to write back to | Default |
+| N12 | Close order | `close_day(D)` refuses while an earlier day still has open task-days (`close_day_out_of_order`), so days always close in date order (6.4 step 3) | Default |
+| N13 | Blocked spillovers | The spillover of a Blocked task-day keeps its reason (D2) | Default |
+| N14 | Correction details | "Closed by correction on {date}" uses the date the correction is made. Correcting to Done sets Completed On to the corrected task-day's date. A correction always needs a reason (one line, max 140 chars) | Default |
+| N15 | Corrections to a non-final status | They change that task-day's history only. If the task would be left with no open task-day, the correction is refused (`correction_would_orphan_task`); open-ended tasks instead reopen with the new status. How a finished dated task should reopen is Q6 | Default |
 
 ---
 
@@ -568,10 +575,10 @@ All are `security definer`, set `search_path = public`, and check the caller the
 | `knit_today()` | any | `(now() at time zone 'Asia/Kolkata')::date` |
 | `is_working_day(d)`, `next_working_day(d)`, `prev_working_day(d)` | any | From `calendar_days` |
 | `refresh_calendar(from, to)` | admin | Rebuild `calendar_days` from the rules and `holidays` |
-| `set_task_status(task_id, status, reason)` | assigned user or admin | Validates: status is user-selectable; reason present for blocked/cancelled; target task-day not locked. Picks the target task-day (today's; else the task's future one; for open tasks creates a `completion` task-day on today). Updates task and task-day, sets `status_changed_on = knit_today()`, `hub_changed_at = now()`, bumps `trackers.state_version`, writes an `events` row, supersedes older pending outbox rows for the task, inserts a new outbox row with the write-back payload (the status word from `writeBack`, or null per N8, and `completed_on`). The Knit Note is rendered by the push job (6.9), not here. Returns the updated task view |
-| `admin_correct_task_day(task_day_id, status, reason)` | admin | Section 6.10, one transaction |
+| `set_task_status(task_id, status, reason)` | assigned user or admin | Validates: status is user-selectable; reason present for blocked/cancelled; target task-day not locked; the task is not removed at source (N11) and is not waiting for an earlier day's close (N10). Picks the target task-day (today's; else the task's future one; for open tasks set to done or cancelled, creates a `completion` task-day on today, N9). Setting the same status and reason again changes nothing. Updates task and task-day, sets `status_changed_on = knit_today()`, `hub_changed_at = now()`, bumps `trackers.state_version`, writes an `events` row, supersedes older pending outbox rows for the task, inserts a new outbox row with the write-back payload (the status word from `writeBack`, or null per N8, and `completed_on`). The Knit Note is rendered by the push job (6.9), not here. Returns the updated task view |
+| `admin_correct_task_day(task_day_id, status, reason)` | admin | Section 6.10 with N14 and N15, one transaction |
 | `apply_pull_plan(tracker_id, expected_state_version, plan jsonb, run_id)` | service role | Applies a pull plan atomically. If `state_version` changed since the plan was computed, applies nothing and returns `retry` |
-| `close_day(d)` | service role | Section 6.4, one transaction, idempotent. Refuses if `d >= knit_today()` |
+| `close_day(d)` | service role | Section 6.4 with N9 and N13, one transaction, idempotent. Refuses if `d >= knit_today()`, or while an earlier day has open task-days (N12). Returns counts and the ids of the tasks it touched, for the close job's Knit Note refresh (10.5) |
 | `acquire_lease(job, ttl)`, `release_lease(job, holder)` | service role | Job mutual exclusion |
 | `backlog_action(task_ids, action, reason)` | admin | Section 6.11 |
 
@@ -845,7 +852,8 @@ docs/                            this PRD, SOW, TRACKERS, RUNBOOK (written durin
 - **Integration (local Supabase via CLI)**: `set_task_status` permission and lock rules; `close_day` creates spillovers, skips holidays and off Saturdays, is idempotent when run twice; catch-up over a 3-day gap; `admin_correct_task_day` closes the chain; `apply_pull_plan` returns retry on stale `state_version`; RLS: a member cannot read another member's tasks.
 - **Race tests (MemorySheetSource)**: row inserted between ID write and verify; rows sorted between read and push; duplicate Knit IDs; push after a column move.
 - **E2E (Playwright)**: log in, see Today, change a status, see Syncing clear; pull forward from Calendar; locked past day is read-only; empty states render.
-- Time is always injected; tests run with `TZ=UTC` to prove IST handling does not depend on the machine.
+- Time is always injected; tests run with `TZ=UTC` to prove IST handling does not depend on the machine. In SQL, integration tests freeze `knit_today()` per transaction through its test clock (`set_config('knit.today', ...)`), which the Data API cannot set.
+- The integration tests also run on PGlite (Postgres in-process, with a stand-in for Supabase's auth schema) for machines without Docker. CI runs both; local Supabase is the reference.
 
 ---
 
@@ -915,3 +923,4 @@ Phases, milestones and acceptance criteria are in `docs/SOW.md`. Summary: Phase 
 | Q3 | The full list of Sapiens Status options (Lists!A2:A8) and which one means done | Phase 2 Sapiens setup (the wizard reads it) | Open |
 | Q4 | Filing Buddy trackers: confirm the status words to standardise on (Not started, In progress, Blocked, Done, Cancelled) | Phase 1 setup | Resolved 25 Sep 2026: yes. Pragaman sets these five words as the Status dropdown in the Filing Buddy sheets himself; Knit never edits dropdowns (SOW 4.2). "Skipped" stays mapped to Cancelled when read |
 | Q5 | Auxman tracker layout | On arrival, 2 or 3 Oct | Open |
+| Q6 | When the admin corrects the final task-day of a finished (dated) task to Yet to Start, In Progress or Blocked, should the task reopen, for example with a task-day on the next working day? Until decided, such corrections are refused (N15) | M8 corrections screen | Open |

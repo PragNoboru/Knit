@@ -165,8 +165,20 @@ export interface PullPlan {
 
 const REMOVED_REASON = "Removed at source";
 
+/** JSON with object keys sorted, so key order (which jsonb does not keep) never counts. */
+function canonical(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
+  if (value !== null && typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .filter(([, v]) => v !== undefined)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${canonical(v)}`).join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
+}
+
 function sameJson(a: unknown, b: unknown): boolean {
-  return JSON.stringify(a) === JSON.stringify(b);
+  return canonical(a) === canonical(b);
 }
 
 function sameSet(a: readonly string[], b: readonly string[]): boolean {

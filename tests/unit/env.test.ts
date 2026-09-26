@@ -11,6 +11,13 @@ import {
   validEnv,
 } from "@/tests/support/fake-env";
 
+/** Narrows a parsed environment to Google mode, where the Google fields exist. */
+function googleOnly(env: ReturnType<typeof parseServerEnv>) {
+  if (env.KNIT_SHEET_SOURCE !== "google")
+    throw new Error("expected google mode");
+  return env;
+}
+
 /** Runs parseServerEnv and returns the error message it throws. */
 function envError(overrides: Record<string, string | undefined>): string {
   try {
@@ -24,7 +31,7 @@ function envError(overrides: Record<string, string | undefined>): string {
 
 describe("parseServerEnv (PRD 18.1)", () => {
   it("accepts a complete environment and decodes the service account key", () => {
-    const env = parseServerEnv(validEnv());
+    const env = googleOnly(parseServerEnv(validEnv()));
     expect(env.APP_URL).toBe("http://localhost:3000");
     expect(env.GOOGLE_SERVICE_ACCOUNT_JSON.client_email).toBe(
       "knit-sync@knit-test.iam.gserviceaccount.com",
@@ -128,10 +135,12 @@ describe("parseServerEnv (PRD 18.1)", () => {
   it("accepts base64 that `base64` wrapped over several lines", () => {
     const wrapped = fakeServiceAccountBase64().replace(/(.{76})/g, "$1\n");
     expect(wrapped).toContain("\n");
-    const env = parseServerEnv({
-      ...validEnv(),
-      GOOGLE_SERVICE_ACCOUNT_JSON: wrapped,
-    });
+    const env = googleOnly(
+      parseServerEnv({
+        ...validEnv(),
+        GOOGLE_SERVICE_ACCOUNT_JSON: wrapped,
+      }),
+    );
     expect(env.GOOGLE_SERVICE_ACCOUNT_JSON.type).toBe("service_account");
   });
 
@@ -190,5 +199,45 @@ describe("supabaseKeyKind", () => {
     ["", "unknown"],
   ])("classifies %s as %s", (key, kind) => {
     expect(supabaseKeyKind(key)).toBe(kind);
+  });
+});
+
+describe("KNIT_SHEET_SOURCE (PRD 18.3, N16)", () => {
+  const googleVars = [
+    "GOOGLE_SERVICE_ACCOUNT_JSON",
+    "KNIT_DRIVE_FOLDER_ID",
+    "KNIT_ARCHIVE_SHEET_ID",
+  ];
+  const withoutGoogle = () =>
+    Object.fromEntries(
+      Object.entries(validEnv()).filter(([key]) => !googleVars.includes(key)),
+    );
+
+  it("defaults to google, where the Google variables are required", () => {
+    expect(parseServerEnv(validEnv()).KNIT_SHEET_SOURCE).toBe("google");
+    expect(() => parseServerEnv(withoutGoogle())).toThrow(
+      /GOOGLE_SERVICE_ACCOUNT_JSON: is missing/,
+    );
+  });
+
+  it("local mode runs without the Google variables", () => {
+    const env = parseServerEnv({
+      ...withoutGoogle(),
+      KNIT_SHEET_SOURCE: "local",
+    });
+    expect(env.KNIT_SHEET_SOURCE).toBe("local");
+  });
+
+  it("refuses local mode on Vercel production, and unknown modes", () => {
+    expect(() =>
+      parseServerEnv({
+        ...withoutGoogle(),
+        KNIT_SHEET_SOURCE: "local",
+        VERCEL_ENV: "production",
+      }),
+    ).toThrow(/local is for development/);
+    expect(() =>
+      parseServerEnv({ ...validEnv(), KNIT_SHEET_SOURCE: "excel" }),
+    ).toThrow(/must be google or local/);
   });
 });

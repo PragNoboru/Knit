@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import { parseServerEnv } from "@/lib/env";
-import { EnvError, parsePublicEnv, supabaseKeyKind } from "@/lib/public-env";
+import { EnvError, supabaseKeyKind } from "@/lib/env-schema";
+import { parsePublicEnv } from "@/lib/public-env";
 import {
   FAKE_CRON_SECRET,
   FAKE_PRIVATE_KEY,

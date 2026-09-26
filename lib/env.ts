@@ -4,13 +4,12 @@ import { z } from "zod";
 
 import {
   baseUrl,
-  describeEnvIssues,
-  EnvError,
-  publicEnvSchema,
+  parseEnv,
   required,
-  supabaseKeyKind,
+  supabaseServerKey,
   type EnvSource,
-} from "@/lib/public-env";
+} from "@/lib/env-schema";
+import { publicEnvSchema } from "@/lib/public-env";
 
 /**
  * Server environment (PRD 18.1). All eight variables are required and are
@@ -18,27 +17,7 @@ import {
  * deployment fails at boot instead of on the first request. The `server-only`
  * import makes the build fail if client code ever imports this module
  * (CLAUDE.md invariant 10).
- *
- * Error messages name the variable and the problem, never the value.
  */
-
-/** The server key: service_role (legacy) or secret. */
-const supabaseServerKey = () =>
-  required().superRefine((key, ctx) => {
-    const kind = supabaseKeyKind(key);
-    if (kind === "anon" || kind === "publishable") {
-      ctx.addIssue({
-        code: "custom",
-        message:
-          "holds the public anon or publishable key; use the service-role or secret key",
-      });
-    } else if (kind === "unknown") {
-      ctx.addIssue({
-        code: "custom",
-        message: "is not a Supabase service-role or secret key",
-      });
-    }
-  });
 
 const serviceAccountKey = z.object({
   type: z.literal("service_account"),
@@ -95,13 +74,11 @@ export const serverEnvSchema = publicEnvSchema.extend({
 export type ServerEnv = z.infer<typeof serverEnvSchema>;
 
 export function parseServerEnv(source: EnvSource): ServerEnv {
-  const result = serverEnvSchema.safeParse(source);
-  if (!result.success) {
-    throw new EnvError(
-      `Knit cannot start: environment variables are missing or invalid (see .env.example):\n${describeEnvIssues(result.error)}`,
-    );
-  }
-  return result.data;
+  return parseEnv(
+    serverEnvSchema,
+    source,
+    "Knit cannot start: environment variables are missing or invalid",
+  );
 }
 
 let cachedServerEnv: ServerEnv | undefined;

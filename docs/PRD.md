@@ -121,6 +121,7 @@ Status: **Adopted** = settled. **Default** = adopted as the default because the 
 | N13 | Blocked spillovers | The spillover of a Blocked task-day keeps its reason (D2) | Default |
 | N14 | Correction details | "Closed by correction on {date}" uses the date the correction is made. Correcting to Done sets Completed On to the corrected task-day's date. A correction always needs a reason (one line, max 140 chars) | Default |
 | N15 | Corrections to a non-final status | They change that task-day's history only. If the task would be left with no open task-day, the correction is refused (`correction_would_orphan_task`); open-ended tasks instead reopen with the new status. How a finished dated task should reopen is Q6 | Default |
+| N16 | Local development without Google | `KNIT_SHEET_SOURCE=local` makes the example trackers in `fixtures/trackers` the Knit folder, with writes saved in `.knit-local/`; the Google variables are then optional. Refused on Vercel production, where `google` (the default) is the only mode | Default |
 
 ---
 
@@ -870,6 +871,7 @@ docs/                            this PRD, SOW, TRACKERS, RUNBOOK (written durin
 | `KNIT_ARCHIVE_SHEET_ID` | Vercel | Archive sheet id |
 | `KNIT_CRON_SECRET` | Vercel + Supabase Vault | Job endpoint secret |
 | `APP_URL` | Vercel + Supabase Vault | Base URL used by cron |
+| `KNIT_SHEET_SOURCE` | Vercel (optional) | `google` (default) or `local` for development (N16) |
 
 `lib/env.ts` validates all of them at startup and fails loudly.
 
@@ -894,7 +896,7 @@ select cron.schedule('knit-structure', '0 1 * * *',    $$select knit_call_job('/
 ```
 
 ### 18.3 Environments
-- Local: Supabase CLI + `next dev`, `MemorySheetSource` or a personal test folder.
+- Local: Supabase CLI + `next dev`, with `KNIT_SHEET_SOURCE=local` (the example trackers, N16) or a personal test folder.
 - Production: one Vercel project, one Supabase project. Preview deployments use the production database only for read-only smoke checks, never for jobs (cron points only at the production URL).
 
 ### 18.4 First admin

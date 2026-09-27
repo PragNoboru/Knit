@@ -134,6 +134,14 @@ jobs:
         run: |
           bash scripts/ci-set-clock.sh 2026-09-30
           pnpm seed:local close > close.log 2>&1 || { cat close.log; echo "::error title=close failed::$(tail -c 3000 close.log | tr '\n' ' ')"; exit 1; }
+      # The seeded admin can sign in with email and password (the reply's tokens are never printed).
+      - name: Sign-in check
+        run: |
+          eval "$(pnpm exec supabase status -o env | grep -E '^[A-Z_]+=' | sed 's/^/export /')"
+          curl -s -X POST "$API_URL/auth/v1/token?grant_type=password" \
+            -H "apikey: $ANON_KEY" -H "Content-Type: application/json" \
+            -d "{\"email\":\"admin@knit.test\",\"password\":\"$KNIT_SEED_PASSWORD\"}" \
+          | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{const j=JSON.parse(d||'{}');if(j.access_token){console.log('Sign-in works.')}else{console.log('::error title=Sign-in check::'+(j.msg||j.error_description||j.error_code||'no token'));process.exit(1)}})"
       - run: pnpm build
       - name: Install Chromium
         run: pnpm exec playwright install --with-deps chromium

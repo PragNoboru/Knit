@@ -44,7 +44,7 @@ Check: the service account's email appears under Share on both the folder and th
 
 ### 2.2 Supabase
 
-1. In the Supabase project (region Mumbai): Authentication > Sign In / Providers: turn **off** "Allow new users to sign up" (D6: the admin creates every login).
+1. In the Supabase project (region Mumbai): Authentication > Sign In / Providers: turn **off** "Allow new users to sign up" (D6: the admin creates every login), and keep the **Email** provider **on** (users sign in with email and password).
 2. Authentication > URL Configuration: set Site URL to the production URL, for example `https://<app>.vercel.app`.
 3. Database > Extensions: enable `pg_cron` and `pg_net`.
 4. Apply the migrations from a terminal in the repository:

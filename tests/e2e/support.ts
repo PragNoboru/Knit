@@ -23,7 +23,24 @@ export async function signIn(page: Page, who: keyof typeof USERS) {
   await page.getByLabel("Email").fill(USERS[who]);
   await page.getByLabel("Password").fill(seedPassword());
   await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page).toHaveURL(/\/$/);
+  // Either Today opens or the form says why not; a failure names which (CI shows it).
+  const home = page
+    .waitForURL((url) => url.pathname === "/", { timeout: 15_000 })
+    .catch(() => undefined);
+  const refused = page
+    .getByRole("alert")
+    .waitFor({ timeout: 15_000 })
+    .catch(() => undefined);
+  await Promise.race([home, refused]);
+  if (new URL(page.url()).pathname !== "/") {
+    const alert = page.getByRole("alert");
+    const message =
+      (await alert.count()) > 0
+        ? await alert.first().innerText()
+        : "no message";
+    throw new Error(`Sign-in as ${who} ended on ${page.url()}: ${message}`);
+  }
+  await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
 }
 
 /** The status dropdown of a task row (StatusControl labels it by the task's title). */

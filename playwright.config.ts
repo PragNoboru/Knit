@@ -58,7 +58,9 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: "pnpm start",
+    // Next.js itself rather than through pnpm, so stopping it at the end is immediate.
+    command: `node node_modules/next/dist/bin/next start --port ${PORT}`,
+    gracefulShutdown: { signal: "SIGTERM", timeout: 5_000 },
     url: `${baseURL}/api/health`,
     reuseExistingServer: !process.env.CI,
     stdout: "pipe",

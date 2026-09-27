@@ -147,7 +147,9 @@ describe.each(registry.trackers.map((t) => [t.name, t] as const))(
       ).toBe(true);
     });
 
-    it("never offers a formula column as a write target (N6)", async () => {
+    // A check on the fixture registry, not on Knit's guards: those are tested in
+    // tests/unit/structure.test.ts and tests/integration/structure.test.ts.
+    it("fixture registry maps no detected formula column as a write target (N6)", async () => {
       const { config, structure } = await readTracker(entry);
       const writeTargets = [
         config.columns.statusWrite,

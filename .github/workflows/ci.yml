@@ -82,7 +82,7 @@ jobs:
   e2e:
     name: End-to-end flows (Playwright)
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
@@ -123,7 +123,10 @@ jobs:
       # PRD 17: time is injected. Knit connects the example trackers on Mon 28 Sep 2026 (go-live),
       # then its clock moves to Wed 30 Sep and the close job closes 28 and 29 Sep, so the flows
       # see spillovers and locked days.
+      # Noboru and Sapiens stay unconnected: the admin flow sets one up through the wizard.
       - name: Seed users and the example trackers on Mon 28 Sep 2026
+        env:
+          KNIT_SEED_TRACKERS: "Filing Buddy · Google Ads,Filing Buddy · Meta Ads"
         run: |
           bash scripts/ci-set-clock.sh 2026-09-28
           pnpm seed:local > seed.log 2>&1 || { cat seed.log; echo "::error title=seed failed::$(tail -c 3000 seed.log | tr '\n' ' ')"; exit 1; }
@@ -141,8 +144,10 @@ jobs:
           set -o pipefail
           pnpm test:e2e 2>&1 | tee e2e.log
       - name: Report the server output of a failed run
-        if: failure()
-        run: echo "::error title=e2e output::$(grep -iE 'error|failed|warn' e2e.log | tail -c 3500 | tr '\n' ' ')"
+        if: failure() || cancelled()
+        run: |
+          echo "::error title=e2e server errors::$(grep -iE 'error|⨯|digest' e2e.log | grep -v '^ *at ' | head -c 3500 | tr '\n' ' ')"
+          echo "::error title=e2e last lines::$(tail -c 3000 e2e.log | tr '\n' ' ')"
 
       # M7: screenshots at 1280 px and 390 px, and the report of any failure.
       - name: Keep the screenshots and the report

@@ -13,8 +13,11 @@ const ADMIN = "test-results/.auth/admin.json";
 export default defineConfig({
   testDir: "tests/e2e",
   outputDir: "test-results/output",
-  timeout: 60_000,
-  expect: { timeout: 15_000 },
+  timeout: 45_000,
+  expect: { timeout: 10_000 },
+  // CI stops early and reports, instead of timing out test after test.
+  globalTimeout: 15 * 60_000,
+  maxFailures: process.env.CI ? 3 : 0,
   // The flows change shared data (statuses), so they run one at a time, in file order.
   fullyParallel: false,
   workers: 1,

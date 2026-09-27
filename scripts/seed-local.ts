@@ -9,8 +9,9 @@
 //   * an admin, admin@knit.test, with the aliases "pragaman" and "p" (so the example trackers'
 //     rows are theirs), and a member, member@knit.test, with the alias "shlok";
 //   * the other example people as known non-users;
-//   * the example trackers of fixtures/trackers.config.json, active from the go-live date
-//     (KNIT_SEED_GO_LIVE, default today in India), with their Knit columns;
+//   * the example trackers of fixtures/trackers.config.json (or only those named in
+//     KNIT_SEED_TRACKERS, comma separated), active from the go-live date (KNIT_SEED_GO_LIVE,
+//     default today in India), with their Knit columns; the others stay New sheet found;
 //   * a first pull of every tracker.
 //
 //   pnpm seed:local close
@@ -219,7 +220,9 @@ async function main() {
     z.string().parse(await rpc("knit_today", {}));
   const source = await getLocalSheetSource();
   const adminId = ids.get(SEED_USERS[0].email)!;
+  const only = process.env.KNIT_SEED_TRACKERS?.split(",").map((n) => n.trim());
   for (const fixture of fixtures.trackers) {
+    if (only && !only.includes(fixture.name)) continue;
     const fileId = path.basename(fixture.fixture).replace(/\.xlsx$/i, "");
     const file = (await source.listFolder()).find((f) => f.id === fileId);
     const tabs = file ? await source.listTabs(fileId) : [];

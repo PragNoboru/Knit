@@ -352,6 +352,12 @@ export class MemorySheetSource implements SheetSource {
     }
     await this.changed(ref.fileId);
   }
+
+  /** Test helper: someone deletes a whole column (0-based index). */
+  async deleteColumn(ref: TabRef, index: number) {
+    for (const row of this.tab(ref).rows) row.splice(index, 1);
+    await this.changed(ref.fileId);
+  }
 }
 
 /** A one-tab spreadsheet from plain values, for tests. Numbers are stored as numbers. */

@@ -239,3 +239,9 @@ export function istDateTime(instant: Date | string): {
     time: `${p.hour}:${p.minute}`,
   };
 }
+
+/** "Mon 28 Sep, 10:40": an instant as seen in India, for the admin screens. */
+export function formatInstant(instant: Date | string): string {
+  const { date, time } = istDateTime(instant);
+  return `${formatDay(date)}, ${time}`;
+}

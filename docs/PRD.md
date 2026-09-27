@@ -122,6 +122,7 @@ Status: **Adopted** = settled. **Default** = adopted as the default because the 
 | N14 | Correction details | "Closed by correction on {date}" uses the date the correction is made. Correcting to Done sets Completed On to the corrected task-day's date. A correction always needs a reason (one line, max 140 chars) | Default |
 | N15 | Corrections to a non-final status | They change that task-day's history only. If the task would be left with no open task-day, the correction is refused (`correction_would_orphan_task`); open-ended tasks instead reopen with the new status. How a finished dated task should reopen is Q6 | Default |
 | N16 | Local development without Google | `KNIT_SHEET_SOURCE=local` makes the example trackers in `fixtures/trackers` the Knit folder, with writes saved in `.knit-local/`; the Google variables are then optional. Refused on Vercel production, where `google` (the default) is the only mode | Default |
+| N17 | Knit Note refreshes after a close | The close queues them as note-only write-backs (`{"note_only": true}`): the push writes only the Knit Note cell, they never count as a change made in Knit (10.3), and a status write-back always supersedes them. A task that already has a write-back waiting gets none, since that push writes the current note | Default |
 
 ---
 
@@ -644,7 +645,7 @@ After a successful push, `source_snapshot` is updated to exactly what was writte
 
 ### 10.5 Close days
 1. Take the lease. Find the oldest unclosed day before `knit_today()` (from the earliest tracker go-live date).
-2. For that day D: set `day_closures(D) = running`; run a forced pull of all active trackers; run push until the outbox has no due rows for active trackers (bounded by the time budget); call `close_day(D)`; enqueue Knit Note updates for every task whose task-days changed; append D's rows to the Knit Archive sheet; run the mismatch check; mark D `closed`.
+2. For that day D: set `day_closures(D) = running`; run a forced pull of all active trackers; run push until the outbox has no due rows for active trackers (bounded by the time budget); call `close_day(D)`; enqueue Knit Note updates for every task whose task-days changed (note-only write-backs, N17); append D's rows to the Knit Archive sheet; run the mismatch check; mark D `closed`.
 3. Failure at any step: `day_closures(D) = failed` with the error; the next call retries from the start. Every step is idempotent.
 4. If yesterday is still not closed at 08:00 IST, admin sees a red banner on Today.
 

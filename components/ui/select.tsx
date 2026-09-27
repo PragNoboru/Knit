@@ -46,11 +46,11 @@ function SelectTrigger({
       {...props}
     >
       {children}
-      <SelectPrimitive.Icon
-        render={
-          <ChevronDownIcon className="pointer-events-none size-4 text-muted-foreground" />
-        }
-      />
+      {/* The chevron as the icon's only child: Base UI's default child is a "▼" character,
+          which would become part of the trigger's text. */}
+      <SelectPrimitive.Icon className="flex">
+        <ChevronDownIcon className="pointer-events-none size-4 text-muted-foreground" />
+      </SelectPrimitive.Icon>
     </SelectPrimitive.Trigger>
   );
 }

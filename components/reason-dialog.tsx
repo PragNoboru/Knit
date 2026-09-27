@@ -32,15 +32,18 @@ export function ReasonDialog({
   const [reason, setReason] = useState("");
   const cancelling = status === "cancelled";
   const trimmed = reason.trim();
+  // Every way out clears the reason (Back, Escape, a click outside), so a reason given for
+  // one question never pre-fills the next one (D2).
+  const close = () => {
+    setReason("");
+    onClose();
+  };
 
   return (
     <Dialog
       open={status !== null}
       onOpenChange={(open) => {
-        if (!open) {
-          setReason("");
-          onClose();
-        }
+        if (!open) close();
       }}
     >
       <DialogContent>
@@ -76,7 +79,7 @@ export function ReasonDialog({
             />
           </div>
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={onClose}>
+            <Button type="button" variant="outline" onClick={close}>
               Back
             </Button>
             <Button

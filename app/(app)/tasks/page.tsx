@@ -8,9 +8,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { KNIT_STATUSES } from "@/lib/domain/config";
 import { parseTaskListQuery } from "@/lib/domain/tasks-screens";
-import { loadTaskList, loadTrackerOptions } from "@/lib/screens";
+import { getKnitToday, loadTaskList, loadTrackerOptions } from "@/lib/screens";
 import { getCurrentUser } from "@/lib/supabase/server";
-import { todayIST } from "@/lib/time";
 import { firstParam, hrefWith } from "@/lib/url";
 
 import { DrawerSlot } from "../_parts/drawer-slot";
@@ -28,10 +27,11 @@ export default async function TasksPage({
 }) {
   const params = await searchParams;
   const query = parseTaskListQuery(params);
-  const [user, list, trackers] = await Promise.all([
+  const [user, list, trackers, today] = await Promise.all([
     getCurrentUser(),
     loadTaskList(query),
     loadTrackerOptions(),
+    getKnitToday(),
   ]);
   const pages = Math.max(1, Math.ceil(list.total / list.pageSize));
   const pageHref = (page: number) =>
@@ -127,7 +127,7 @@ export default async function TasksPage({
       {list.rows.length > 0 ? (
         <TaskList
           rows={list.rows}
-          today={todayIST()}
+          today={today}
           drawerHref={(taskId) => hrefWith("/tasks", params, { task: taskId })}
         />
       ) : null}

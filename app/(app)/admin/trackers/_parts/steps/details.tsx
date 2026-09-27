@@ -2,12 +2,14 @@ import { ActionForm } from "@/components/admin/action-form";
 import { Field, Section, TextInput } from "@/components/admin/fields";
 import { TrackerChip } from "@/components/tracker-chip";
 import { saveDetails } from "@/lib/actions/admin";
-import type { AdminTracker } from "@/lib/admin/data";
+import { loadSheetDeps, type AdminTracker } from "@/lib/admin/data";
+import { goLiveDefault } from "@/lib/domain/wizard";
 import { TRACKER_COLORS } from "@/lib/domain/cards";
 
 // PRD 11 step 7: name, colour from the 8-colour palette, go-live (defaults to today; D1).
-export function DetailsStep({ tracker }: { tracker: AdminTracker }) {
+export async function DetailsStep({ tracker }: { tracker: AdminTracker }) {
   const draft = tracker.state === "draft";
+  const today = draft ? await (await loadSheetDeps()).store.today() : null;
   return (
     <Section title="Name, colour and go-live">
       <ActionForm
@@ -37,7 +39,11 @@ export function DetailsStep({ tracker }: { tracker: AdminTracker }) {
               id="goLive"
               name="goLive"
               type="date"
-              defaultValue={tracker.goLiveDate}
+              defaultValue={
+                today === null
+                  ? tracker.goLiveDate
+                  : goLiveDefault(tracker, today)
+              }
               disabled={!draft}
               required
             />

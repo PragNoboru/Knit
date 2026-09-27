@@ -32,3 +32,32 @@ export function firstParam(
   const value = params[key];
   return Array.isArray(value) ? value[0] : value;
 }
+
+const INSIDE_KNIT = "http://knit.invalid";
+
+/** A backslash or a control character: browsers read "/\" as "//" and drop tabs and newlines. */
+const hasUnsafeCharacter = (value: string) =>
+  [...value].some((char) => {
+    const code = char.charCodeAt(0);
+    return char === "\\" || code < 0x20 || code === 0x7f;
+  });
+
+/**
+ * PRD 9.3, 12.1: where to go after signing in, only when it is a path inside Knit. Anything a
+ * browser would resolve to another site ("//evil.com", "/\evil.com", "/<tab>/evil.com", a full
+ * URL) gives undefined, so /login can never be used as an open redirect.
+ */
+export function safeNextPath(
+  next: string | null | undefined,
+): string | undefined {
+  if (!next || !next.startsWith("/") || hasUnsafeCharacter(next))
+    return undefined;
+  try {
+    const url = new URL(next, INSIDE_KNIT);
+    return url.origin === INSIDE_KNIT
+      ? url.pathname + url.search + url.hash
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}

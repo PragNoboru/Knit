@@ -168,10 +168,14 @@ export function buildDayView(
     if (matches(card)) rows[key].push({ card, early });
   };
   for (const card of data.rows) place(groupOfDayRow(card), card);
-  // 6.3.3: windows and open-ended tasks are ongoing on working days.
-  if (data.isWorking) for (const card of data.ongoing) place("ongoing", card);
+  // 6.3.3, N4: a window is ongoing on working days; an open-ended task from its start until
+  // done, off days included.
+  for (const card of data.ongoing)
+    if (data.isWorking || card.dateKind === "open") place("ongoing", card);
   for (const card of data.pulledForward) place("pulled_forward", card);
-  for (const card of data.earlyDone) place("done", card, true);
+  // 6.5: Today lists early completions; N18(a): another day shows only its own task-days.
+  if (when === "today")
+    for (const card of data.earlyDone) place("done", card, true);
 
   const groups = GROUP_ORDER.filter((key) => rows[key].length > 0).map(
     (key) => ({
@@ -182,7 +186,7 @@ export function buildDayView(
     }),
   );
 
-  let notice = noticeFor(data, when);
+  let notice = noticeFor(data, when, placed);
   const filtering = filters.trackerIds.length + filters.statuses.length > 0;
   if (notice === null && filtering && groups.length === 0)
     notice = { kind: "no_match" };
@@ -195,8 +199,17 @@ export function buildDayView(
   };
 }
 
-/** PRD 12.7: the message for the day, from the unfiltered data. */
-function noticeFor(data: DayViewData, when: DayView["when"]): DayNotice | null {
+/**
+ * PRD 12.7: the message for the day, from the unfiltered data. The tasks it offers leave out
+ * those a group already shows (`placed`), so a task shows once per page (N18 b).
+ */
+function noticeFor(
+  data: DayViewData,
+  when: DayView["when"],
+  placed: ReadonlySet<string>,
+): DayNotice | null {
+  const unplaced = (cards: readonly TaskCard[]) =>
+    cards.filter((card) => !placed.has(card.taskId));
   if (data.isAdmin && !data.hasTrackers) return { kind: "no_trackers" };
   if (!data.isAdmin && !data.hasTasks)
     return { kind: "no_tasks", adminContact: data.adminContact };
@@ -208,7 +221,7 @@ function noticeFor(data: DayViewData, when: DayView["when"]): DayNotice | null {
         nextWorkingDay: data.nextWorkingDay,
       };
     if (when === "today")
-      return { kind: "nothing_planned", upcoming: data.upcoming };
+      return { kind: "nothing_planned", upcoming: unplaced(data.upcoming) };
     return when === "past"
       ? { kind: "nothing_scheduled" }
       : { kind: "nothing_planned_day" };
@@ -221,7 +234,7 @@ function noticeFor(data: DayViewData, when: DayView["when"]): DayNotice | null {
       kind: "all_clear",
       done,
       nextWorkingDay: data.nextWorkingDay,
-      nextDayRows: [...data.nextDayRows].sort(compareCards),
+      nextDayRows: unplaced(data.nextDayRows).sort(compareCards),
     };
   }
   return null;

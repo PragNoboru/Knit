@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
 
 import { ActionButton } from "@/components/admin/action-button";
-import { ActionForm } from "@/components/admin/action-form";
-import { Field, Section, Table, TextInput } from "@/components/admin/fields";
+import { Section, Table } from "@/components/admin/fields";
+import { HolidayForm } from "@/components/admin/holiday-form";
 import { addHoliday, extendCalendar, removeHoliday } from "@/lib/actions/admin";
 import { loadHolidays } from "@/lib/admin/data";
 import { formatDate, formatDay } from "@/lib/time";
@@ -22,30 +22,7 @@ export default async function HolidaysPage() {
         title="Add a holiday"
         description="Open tasks due on or planned for that date get a new due date. Closed days do not change."
       >
-        <ActionForm action={addHoliday} submitLabel="Save holiday">
-          <div className="grid gap-4 sm:grid-cols-3">
-            <Field label="Date" htmlFor="day">
-              <TextInput id="day" name="day" type="date" required />
-            </Field>
-            <Field label="Name" htmlFor="holiday-name">
-              <TextInput
-                id="holiday-name"
-                name="name"
-                required
-                maxLength={80}
-              />
-            </Field>
-            <label className="flex items-center gap-2 self-end pb-1.5 text-sm">
-              <input
-                type="checkbox"
-                name="confirm"
-                value="1"
-                className="size-4 accent-foreground"
-              />
-              Recompute open tasks on this date
-            </label>
-          </div>
-        </ActionForm>
+        <HolidayForm action={addHoliday} />
       </Section>
 
       <Section

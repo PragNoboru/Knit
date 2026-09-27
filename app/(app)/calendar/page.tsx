@@ -1,12 +1,11 @@
 import type { Metadata } from "next";
 
 import { MonthCalendar } from "@/components/month-calendar";
-import { loadMonth } from "@/lib/screens";
+import { getKnitToday, loadMonth } from "@/lib/screens";
 import {
   addMonths,
   isLocalDate,
   startOfMonth,
-  todayIST,
   type LocalDate,
 } from "@/lib/time";
 import { firstParam, hrefWith } from "@/lib/url";
@@ -23,7 +22,8 @@ export default async function CalendarPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const params = await searchParams;
-  const today = todayIST();
+  // Invariant 1: the database's today (knit_today) picks the default month and day.
+  const today = await getKnitToday();
   const monthParam = `${firstParam(params, "month") ?? ""}-01`;
   const month = isLocalDate(monthParam) ? monthParam : startOfMonth(today);
   const dayParam = firstParam(params, "day");

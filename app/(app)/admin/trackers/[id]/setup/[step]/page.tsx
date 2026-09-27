@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 
 import { loadTracker } from "@/lib/admin/data";
 import { WIZARD_STEPS, type WizardStep } from "@/lib/domain/wizard";
+import { firstParam } from "@/lib/url";
 
 import { ActivateStep } from "../../../_parts/steps/activate";
 import { ColumnsStep } from "../../../_parts/steps/columns";
@@ -18,10 +19,13 @@ export const metadata: Metadata = { title: "Set up a tracker · Knit" };
 // PRD 11 steps 3 to 9, for a draft tracker; steps 3 to 8 also edit a live one.
 export default async function SetupStepPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string; step: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { id, step } = await params;
+  const query = await searchParams;
   const tracker = await loadTracker(id);
   const known = WIZARD_STEPS.find((s) => s.step === step && s.step !== "tab");
   if (!tracker || !known || tracker.state === "archived") notFound();
@@ -30,7 +34,20 @@ export default async function SetupStepPage({
   const body = {
     header: <HeaderStep tracker={tracker} />,
     columns: <ColumnsStep tracker={tracker} />,
-    statuses: <StatusesStep tracker={tracker} />,
+    statuses: (
+      <StatusesStep
+        tracker={tracker}
+        pending={
+          // 11: a live tracker's new status columns, saved with this step (saveColumns).
+          tracker.state !== "draft" && firstParam(query, "statusRead")
+            ? {
+                statusRead: firstParam(query, "statusRead") ?? "",
+                statusWrite: firstParam(query, "statusWrite") ?? "",
+              }
+            : null
+        }
+      />
+    ),
     owners: <OwnersStep tracker={tracker} />,
     details: <DetailsStep tracker={tracker} />,
     preview: <PreviewStep tracker={tracker} />,

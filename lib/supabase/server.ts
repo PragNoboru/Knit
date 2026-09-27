@@ -8,7 +8,7 @@ import { z } from "zod";
 
 import { getServerEnv } from "@/lib/env";
 
-import { authCookieOptions } from "./cookies";
+import { authCookieOptions, withSessionMaxAge } from "./cookies";
 
 /**
  * The signed-in user's Supabase client for Server Components and server actions. Every query
@@ -30,7 +30,7 @@ export const getSupabase = cache(async (): Promise<SupabaseClient> => {
         setAll: (toSet) => {
           try {
             for (const { name, value, options } of toSet)
-              store.set(name, value, options);
+              store.set(name, value, withSessionMaxAge(options));
           } catch {
             // A Server Component cannot set cookies; proxy.ts keeps the session fresh.
           }

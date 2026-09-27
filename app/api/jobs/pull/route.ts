@@ -7,6 +7,7 @@ import { pullAll } from "@/lib/sync/pull";
 // PRD 7.3, 13: discover + pull. Called by pg_cron every 10 minutes, and by Sync now.
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+// The plan's allowed maximum (7.3): see docs/RUNBOOK.md 2.3 before changing it.
 export const maxDuration = 60;
 
 const Body = z.object({

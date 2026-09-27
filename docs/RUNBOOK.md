@@ -46,6 +46,7 @@ Check: put the three Google values in a `.env.local` (never committed) and run `
 
 1. In the Supabase project (region Mumbai): Authentication > Sign In / Providers: turn **off** "Allow new users to sign up" (D6: the admin creates every login), and keep the **Email** provider **on** (users sign in with email and password).
 2. Authentication > URL Configuration: set Site URL to the production URL, for example `https://<app>.vercel.app`.
+   - Sessions last 30 days (D5): Knit's sign-in cookies expire 30 days after the last visit. If the plan offers it, also set Authentication > Sessions > Inactivity timeout to 30 days (`720h`), so a session copied off a device ends too.
 3. Database > Extensions: enable `pg_cron` and `pg_net`.
 4. Apply the migrations from a terminal in the repository:
 
@@ -80,6 +81,11 @@ Do not connect Supabase's GitHub integration with automatic migrations: migratio
 
    Leave `KNIT_SHEET_SOURCE` unset: production always uses Google (N16 refuses `local` there).
 2. Project Settings > Functions: set the region to **Mumbai (bom1)**, next to the database.
+   - Function time limit (PRD 7.3): every job call works for 80% of its function's `maxDuration` and leaves the rest to the next call. Knit ships with `maxDuration = 60` seconds, which every plan allows. To give each call the plan's allowed maximum (for example 300 seconds with Fluid compute on, which new projects have by default), change the value in all six places together, then deploy and run `cron.sql` again (2.4):
+     - `export const maxDuration = 60;` in `app/api/jobs/pull/route.ts`, `app/api/jobs/push/route.ts`, `app/api/jobs/close/route.ts`, `app/api/jobs/structure/route.ts` and `app/(app)/layout.tsx` (Sync now);
+     - `timeout_milliseconds := 60000` in `supabase/sql/cron.sql` (the value in milliseconds).
+
+     A value above the plan's limit makes the deploy fail: check Project Settings > Functions first.
 3. Build only `main`: Project Settings > Git > Ignored Build Step, choose "Custom" and enter
 
    ```bash
@@ -95,16 +101,18 @@ Preview deployments stay off: they would share the production database (PRD 18.3
 
 ### 2.4 Jobs (PRD 18.2)
 
-1. Open `supabase/sql/cron.sql`. In the Supabase SQL editor, paste it and replace the two placeholders with the production URL and the same `KNIT_CRON_SECRET` as in Vercel. Run it once. Do not save the filled-in copy anywhere.
-2. Check, a few minutes later:
+1. Open `supabase/sql/cron.sql`. In the Supabase SQL editor, paste it and replace the two placeholders with the production URL and the same `KNIT_CRON_SECRET` as in Vercel. Run it. Do not save the filled-in copy anywhere. The script is safe to run again: it updates the secrets, the function and the jobs, so running it again is also how the app URL or the cron secret is changed.
+2. Check, a few minutes later, that the jobs exist and that the app accepts their calls:
 
    ```sql
    select jobname, schedule, active from cron.job order by jobname;
-   select jobid, status, return_message, start_time
-   from cron.job_run_details order by start_time desc limit 10;
+   select status_code, left(content, 200) as content, error_msg, created
+   from net._http_response order by created desc limit 10;
    ```
 
-   and in Knit, Admin > Sync health lists `pull` and `push` runs.
+   Every response should have `status_code` 200. A 401 means the Vault secret differs from `KNIT_CRON_SECRET` in Vercel; a missing response or an `error_msg` means the URL is wrong. (`cron.job_run_details` only says the request was queued: `pg_net` sends it afterwards, so it shows "succeeded" even when the app refused the call.)
+
+After 2.5, Admin > Sync health lists the job runs: `discover` every 10 minutes, and, once a tracker is connected (section 4), `pull` for each tracker. `push` and `close` show only calls that had something to do (a write-back pushed, a day closed) or failed, and any call of any job that found another call still running shows as "skipped".
 
 ### 2.5 First admin (PRD 18.4)
 
@@ -122,10 +130,10 @@ Check: sign in at `https://<app>.vercel.app/login`.
 
 - [ ] Google: APIs on, service account key made, folder and archive shared as Editor, key file deleted
 - [ ] Supabase: sign-ups off, Site URL set, `pg_cron` and `pg_net` on, `db push` done, calendar has 730 days
-- [ ] Vercel: nine variables set for Production, region Mumbai, only `main` builds, deployments turned on
+- [ ] Vercel: nine variables set for Production, region Mumbai, only `main` builds, deployments turned on, `maxDuration` checked against the plan (2.3)
 - [ ] `/api/health` is ok
-- [ ] `cron.sql` run with the real URL and secret; `cron.job_run_details` shows successes
-- [ ] Admin bootstrapped and signed in
+- [ ] `cron.sql` run with the real URL and secret; `net._http_response` shows status 200
+- [ ] Admin bootstrapped and signed in; Sync health lists `discover` runs
 - [ ] First tracker connected (section 4) and Today shows its tasks
 - [ ] A status changed in Knit reaches the sheet within 60 seconds; a status changed in the sheet reaches Knit within 10 minutes (or at once with Sync now)
 
@@ -148,7 +156,9 @@ Knit never guesses: an unmapped status counts as Yet to Start (never Done), an u
 4. Activation adds a hidden **Knit ID** column (protected with a warning) and a visible **Knit Note** column at the right of the tab, writes an ID on every row and pulls the tracker. Do not edit, sort into, or delete the Knit ID column.
 5. **Backlog review** (shown when old rows are still open): Bring to today, Mark done, or Cancel with a reason. Rows left alone stay history only.
 
-To change a live tracker's mapping later: Admin > Trackers > the tracker > **Edit mapping**. Saving checks the tab and pulls again; history is never rewritten.
+To change a live tracker's mapping later: Admin > Trackers > the tracker > **Edit mapping**. Saving checks the tab and pulls again; history is never rewritten. Choosing another status column takes you to the statuses step: Knit keeps using the old column until the new column's words are mapped there.
+
+To connect another tab of a spreadsheet that already has a tracker: **Set up another tab** on the Trackers list or on the tracker's page.
 
 ## 5. Go-live on the real trackers (SOW Phase 2)
 
@@ -161,14 +171,15 @@ To change a live tracker's mapping later: Admin > Trackers > the tracker > **Edi
    pnpm exec supabase db reset --linked
    ```
 
-   Then run `cron.sql` again (2.4) and bootstrap the admin again (2.5).
+   The reset keeps the Vault secrets but drops the jobs. Then run `cron.sql` again (2.4, it is safe to run again) and bootstrap the admin again (2.5).
 5. Connect each real tracker (section 4) with go-live on the agreed date, and review each backlog.
 
 ## 6. Rotate secrets
 
 | Secret | Steps |
 | --- | --- |
-| `KNIT_CRON_SECRET` | Make a new value. Update it in Vercel and redeploy. Then, in the SQL editor: `select vault.update_secret((select id from vault.secrets where name = 'knit_cron_secret'), '<new value>');`. Until both match, job calls are refused with 401 (nothing is lost: the jobs catch up). |
+| `KNIT_CRON_SECRET` | Make a new value. Update it in Vercel and redeploy. Then, in the SQL editor: `select vault.update_secret((select id from vault.secrets where name = 'knit_cron_secret'), '<new value>');` (or run `cron.sql` again with both values, 2.4). Until both match, job calls are refused with 401 (nothing is lost: the jobs catch up). |
+| The app URL (`APP_URL`) | Update it in Vercel and redeploy, then run `cron.sql` again with the new URL (2.4). |
 | Service account key | In Google Cloud, create a new key for `knit-sync`; base64 it (2.1 step 3); update `GOOGLE_SERVICE_ACCOUNT_JSON` in Vercel; redeploy; check Sync health shows a successful pull; then delete the old key in Google Cloud. |
 | Supabase service role or secret key | Create or roll the key in Project Settings > API; update `SUPABASE_SERVICE_ROLE_KEY` in Vercel; redeploy; check `/api/health`; revoke the old key. |
 | A user's password | Admin > People > Reset. Deactivate removes a user's access at once. |
@@ -193,8 +204,8 @@ To change a live tracker's mapping later: Admin > Trackers > the tracker > **Edi
 | A write refused (protected range) | Needs Attention: Write refused; the task shows "Not saved to sheet" | Give the service account edit rights on the status and completed-on columns (Data > Protect sheets and ranges), then **Retry** (or Sync health > Retry failed). |
 | A task's row deleted before its write | Needs Attention: Row not found | If the row was deleted on purpose, Dismiss: the next pull marks the task removed. If not, restore the row from Version history and Retry. |
 | Formula column mapped for writing | Tracker paused, Needs Attention: Formula column | Edit mapping: choose a plain column for the status or completed-on write. |
-| Google 429 or 5xx | Sync health shows failed runs with Google errors | Nothing: calls back off and retry; write-backs wait in the outbox. If it lasts hours, check the Google Cloud quotas page. |
-| Two job runs overlap | Sync health shows a run "skipped" | Nothing: a lease lets one run at a time. |
+| Google 429 or 5xx | Sync health shows failed `pull` runs with Google errors, and failed `push` runs with write-backs waiting for a retry | Nothing: calls back off and retry; write-backs wait in the outbox. If it lasts hours, check the Google Cloud quotas page. |
+| Two job runs overlap | Sync health shows a run "skipped" | Nothing: a lease lets one run at a time. A change the admin saved while a pull was running (a mapping, a status, an owner name, a holiday) is still pulled: at once, or by the next pull within 10 minutes. |
 | The close interrupted | Admin banner after 08:00 IST "Yesterday is not closed yet"; Sync health > Day closes shows failed with the error | The close retries every 15 minutes and catches up day by day in order. Fix what the error names (often a paused tracker or Google errors), then wait for the next run. |
 | Supabase unavailable | "Knit can't load this page" with Try again | Check the Supabase status page and the project (a paused free project: Restore). Nothing is lost: the sheets and the Knit Archive hold the data. |
 | Dates look a day off | Tasks on the wrong day | Knit uses India time everywhere. In the SQL editor `select knit_today();` must show today's date in India. If it does not, report it: do not change the server's timezone. |

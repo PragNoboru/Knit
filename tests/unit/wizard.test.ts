@@ -9,16 +9,21 @@ import { aliasMap } from "@/lib/domain/owners";
 import { isEmptyRow, normaliseRow } from "@/lib/domain/rows";
 import {
   columnSamples,
+  completedOnPatternProblem,
   dateParseRate,
   draftProblems,
   finalConfig,
+  goLiveDefault,
   nextColour,
   previewStats,
   statusChoices,
   suggestHeaderRow,
   unknownOwnerNames,
   unmappedChoices,
+  writeBackOptions,
+  writeBackValue,
   writeBackWords,
+  writeTargetProblem,
   type DraftConfig,
 } from "@/lib/domain/wizard";
 import { MemorySheetSource } from "@/lib/sheets/memory";
@@ -211,5 +216,145 @@ describe("draft and activation (11)", () => {
   it("gives a new tracker the first unused colour", () => {
     expect(nextColour([])).toBe("indigo");
     expect(nextColour(["indigo", "teal"])).toBe("amber");
+  });
+});
+
+// Audit findings 10, 34, 35, 36, 61: the rules the setup wizard's actions check.
+describe("the wizard's checks", () => {
+  it("fixture configs pass every check", async () => {
+    for (const entry of registry.trackers) {
+      const config = TrackerConfig.parse(entry);
+      expect(writeTargetProblem(config.columns, config.titleTemplate)).toBe(
+        null,
+      );
+      if (config.completedOnFormat?.type === "text")
+        expect(
+          completedOnPatternProblem(config.completedOnFormat.pattern, TODAY),
+        ).toBe(null);
+    }
+  });
+
+  it("blocks activation while a word of the status column is unmapped (11 step 5)", () => {
+    const expected = TrackerConfig.parse(byName("Noboru · CA Campaign"));
+    const draft: DraftConfig = { ...expected };
+    expect(draftProblems(draft, { unmappedWords: [] })).toEqual([]);
+    expect(draftProblems(draft, { unmappedWords: ["Posted", ""] })).toEqual([
+      {
+        step: "statuses",
+        problem:
+          "Choose a Knit status for every word. Not mapped yet: Posted, (blank).",
+      },
+    ]);
+  });
+
+  it("offers write-back words from the status write column (6.8)", async () => {
+    const { config, ref } = await open(byName("Filing Buddy · Meta Ads"));
+    const rows = await source.readRows(ref, config.headerRow);
+    const structure = await source.readStructure(ref, config.headerRow);
+    const dropdown = (header: string) =>
+      structure.validations[normaliseKey(header)]?.options ?? null;
+    // Read from Status, write to the Phase column: the words are Phase's, not Status's.
+    const words = writeBackOptions(rows, "Phase", dropdown("Phase"));
+    const phases = writeBackWords(statusChoices(rows, "Phase", null));
+    expect(words).toEqual(phases);
+    expect(words).not.toContain("Not started");
+    expect(writeBackOptions(rows, "Status", dropdown("Status"))).toContain(
+      "Not started",
+    );
+    expect(writeBackOptions(rows, null, null)).toEqual([]);
+  });
+
+  it("accepts only an offered write-back word, leave unchanged or clear", () => {
+    expect(writeBackValue("Yes", ["Yes", "No"], true)).toEqual({
+      ok: true,
+      value: "Yes",
+    });
+    expect(writeBackValue("Posted", ["Yes", "No"], true)).toEqual({
+      ok: false,
+    });
+    expect(writeBackValue("__leave__", [], false)).toEqual({
+      ok: true,
+      value: null,
+    });
+    expect(writeBackValue("__clear__", ["Yes"], true)).toEqual({
+      ok: true,
+      value: "",
+    });
+    expect(writeBackValue("__clear__", [], false)).toEqual({ ok: false });
+    expect(writeBackValue("Yes", ["Yes"], false)).toEqual({ ok: false });
+  });
+
+  it("never lets a write target be a content column (invariant 5)", () => {
+    const columns = TrackerConfig.parse(
+      byName("Filing Buddy · Google Ads"),
+    ).columns;
+    const problem = (change: Partial<typeof columns>, title = "{Task}") =>
+      writeTargetProblem({ ...columns, ...change }, title);
+    expect(problem({})).toBe(null);
+    expect(problem({ completedOn: "Date" })).toMatch(/planned date/);
+    expect(problem({ statusWrite: "Task" })).toMatch(/the title/);
+    expect(problem({ statusWrite: "Phase" }, "{ID} · {Phase}")).toMatch(
+      /part of the title/,
+    );
+    expect(problem({ completedOn: "Owner" })).toMatch(/the owner/);
+    expect(problem({ statusWrite: "ID" })).toMatch(/source ID/);
+    expect(problem({ completedOn: "Blocks go-live?" })).toMatch(
+      /critical flag/,
+    );
+    expect(problem({ completedOn: "Knit Note" })).toMatch(/Knit's own/);
+    expect(problem({ statusWrite: "Done on" })).toBe(
+      "Status (write) and Completed on must be different columns.",
+    );
+    expect(problem({ statusWrite: null, completedOn: "status" })).toBe(
+      "Completed on cannot be the column Knit reads the status from.",
+    );
+    // Status (write) may be the column Knit reads the status from (all four trackers do).
+    expect(problem({ statusWrite: "Status" })).toBe(null);
+    expect(
+      draftProblems({ columns: { ...columns, completedOn: "Date" } }).some(
+        (p) => p.step === "columns" && /planned date/.test(p.problem),
+      ),
+    ).toBe(true);
+  });
+
+  it("accepts only completed-on patterns that read back as the same date (6.8)", () => {
+    for (const pattern of [
+      "EEE d MMM",
+      "d MMM",
+      "dd/MM/yyyy",
+      "d MMM yyyy",
+      "yyyy-MM-dd",
+      "dd-MM-yyyy",
+    ])
+      expect(completedOnPatternProblem(pattern, TODAY)).toBe(null);
+    for (const pattern of [
+      "dd/mm/yyyy", // "28/mm/2026"
+      "DD/MM/YYYY", // "DD/09/2026"
+      "EEEE", // no day or month
+      "MMM yyyy", // no day
+      "d", // no month
+      "Done 'on' d MMM",
+    ])
+      expect(completedOnPatternProblem(pattern, TODAY)).toMatch(
+        /cannot write dates as/,
+      );
+  });
+
+  it("defaults go-live to today until the admin saves a date at step 7 (11 step 7)", () => {
+    const tracker = {
+      state: "draft",
+      goLiveDate: "2026-09-28",
+      draft: {} as DraftConfig,
+    };
+    expect(goLiveDefault(tracker, "2026-09-30")).toBe("2026-09-30");
+    expect(
+      goLiveDefault(
+        { ...tracker, draft: { goLiveChosen: true } },
+        "2026-09-30",
+      ),
+    ).toBe("2026-09-28");
+    expect(goLiveDefault({ ...tracker, state: "active" }, "2026-09-30")).toBe(
+      "2026-09-28",
+    );
   });
 });

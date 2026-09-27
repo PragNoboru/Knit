@@ -23,6 +23,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { callAction } from "@/lib/actions/call";
 import { correctTaskDay, reportIssue } from "@/lib/actions/tasks";
 import { USER_STATUSES, type UserStatus } from "@/lib/domain/config";
 import { REASON_MAX_LENGTH, STATUS_LABELS } from "@/lib/domain/status";
@@ -54,11 +55,9 @@ export function CorrectionButton({
             event.preventDefault();
             startTransition(async () => {
               setError(null);
-              const result = await correctTaskDay({
-                taskDayId,
-                status,
-                reason,
-              });
+              const result = await callAction(() =>
+                correctTaskDay({ taskDayId, status, reason }),
+              );
               if (!result.ok) setError(result.error);
               else {
                 setReason("");
@@ -163,7 +162,9 @@ export function ReportIssueButton({
             event.preventDefault();
             startTransition(async () => {
               setError(null);
-              const result = await reportIssue({ taskDayId, text });
+              const result = await callAction(() =>
+                reportIssue({ taskDayId, text }),
+              );
               if (!result.ok) setError(result.error);
               else {
                 setOpen(false);

@@ -76,9 +76,42 @@ test("Cancelled asks for confirmation, and Back changes nothing", async ({
   await pickStatus(page, title, "Cancelled");
   const dialog = page.getByRole("dialog", { name: "Cancel this task?" });
   await expect(dialog).toContainText("This removes it from all future days");
+  await dialog.getByLabel("Reason").fill("Duplicate of G12");
   await dialog.getByRole("button", { name: "Back" }).click();
   await expect(dialog).toBeHidden();
   await expect(statusOf(page, title)).toHaveText("Yet to Start");
+  // The reason typed before Back does not come back for the next question (D2).
+  await pickStatus(page, title, "Blocked");
+  const blocked = page.getByRole("dialog", { name: "Why is it blocked?" });
+  await expect(blocked.getByLabel("Reason")).toHaveValue("");
+  await blocked.getByRole("button", { name: "Back" }).click();
+  await expect(statusOf(page, title)).toHaveText("Yet to Start");
+});
+
+test("a request that cannot reach the server shows inline and keeps the list", async ({
+  page,
+}) => {
+  await page.goto("/");
+  const title = "Attach negative lists";
+  // The status change's server action never gets an answer (a dropped connection).
+  await page.route("**/*", (route) =>
+    route.request().method() === "POST" &&
+    route.request().headers()["next-action"] !== undefined
+      ? route.abort("internetdisconnected")
+      : route.continue(),
+  );
+  await pickStatus(page, title, "In Progress");
+  await expect(
+    page
+      .getByRole("alert")
+      .filter({ hasText: "Knit couldn't reach the server" }),
+  ).toBeVisible();
+  await expect(statusOf(page, title)).toHaveText("Yet to Start");
+  await expect(page.getByText("Knit can't load this page")).toHaveCount(0);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+    /^Wed 30 Sep/,
+  );
+  await page.unrouteAll();
 });
 
 test("the task drawer shows every day of a task and closes back to the list", async ({

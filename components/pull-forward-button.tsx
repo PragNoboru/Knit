@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 
 import { Button } from "@/components/ui/button";
+import { callAction } from "@/lib/actions/call";
 import { pullForward } from "@/lib/actions/tasks";
 
 /** PRD 12.7: "Nothing is planned for today" offers the next tasks with Pull forward (D3). */
@@ -25,10 +26,9 @@ export function PullForwardButton({
         onClick={() =>
           startTransition(async () => {
             setError(null);
-            const result = await pullForward({
-              taskId,
-              status: "in_progress",
-            });
+            const result = await callAction(() =>
+              pullForward({ taskId, status: "in_progress" }),
+            );
             if (!result.ok) setError(result.error);
           })
         }

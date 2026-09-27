@@ -35,6 +35,9 @@ const MESSAGES: Record<string, string> = {
 
 export const GENERIC_ERROR = "Something went wrong. Try again.";
 export const SIGNED_OUT_ERROR = "Your session has ended. Sign in again.";
+/** The request itself failed (no connection, a timeout): the server never answered. */
+export const NETWORK_ERROR =
+  "Knit couldn't reach the server. Check your connection and try again.";
 
 /** The message for an error raised by a database function; unknown errors stay generic. */
 export function messageFor(error: { message?: string } | null | undefined) {

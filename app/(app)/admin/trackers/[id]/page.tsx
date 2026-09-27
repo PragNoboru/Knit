@@ -18,6 +18,7 @@ import {
   loadAdminTrackers,
   loadSheetDeps,
   loadTracker,
+  pausedForMissingKnitIds,
 } from "@/lib/admin/data";
 import { STATUS_LABELS } from "@/lib/domain/status";
 import { previewKnitIdRecreate } from "@/lib/sync/recreate-ids";
@@ -40,8 +41,7 @@ export default async function TrackerPage({
   if (tracker.state === "draft") redirect(`/admin/trackers/${id}/setup/header`);
   const summary = (await loadAdminTrackers()).trackers.find((t) => t.id === id);
   const missingIds =
-    tracker.state === "paused" &&
-    (tracker.pauseReason ?? "").toLowerCase().includes("knit id");
+    tracker.state === "paused" && pausedForMissingKnitIds(tracker.pauseReason);
   const { store, source } = await loadSheetDeps();
   const recreate = missingIds
     ? await (async () => {
@@ -80,7 +80,7 @@ export default async function TrackerPage({
       </div>
       {saved ? (
         <p role="status" className="text-sm text-muted-foreground">
-          Saved. Knit checks the tab and pulls it again now.
+          Saved. Knit checks the tab and pulls it again.
         </p>
       ) : null}
 
@@ -110,6 +110,13 @@ export default async function TrackerPage({
                   className={buttonVariants({ variant: "outline", size: "sm" })}
                 >
                   Edit mapping
+                </Link>
+                {/* Glossary, 11 step 2: another tab of this spreadsheet is another tracker. */}
+                <Link
+                  href={`/admin/trackers/new/${encodeURIComponent(tracker.fileId)}`}
+                  className={buttonVariants({ variant: "outline", size: "sm" })}
+                >
+                  Set up another tab
                 </Link>
                 <ActionButton
                   action={archiveTracker.bind(null, id)}

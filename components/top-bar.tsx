@@ -16,6 +16,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { signOut } from "@/lib/actions/auth";
+import { callAction } from "@/lib/actions/call";
 import { syncNow } from "@/lib/actions/tasks";
 import { cn } from "@/lib/utils";
 
@@ -149,7 +150,7 @@ function SyncNowButton() {
         title={message?.text}
         onClick={() =>
           startTransition(async () => {
-            const result = await syncNow();
+            const result = await callAction(() => syncNow());
             setMessage(
               result.ok
                 ? { text: result.data.message, ok: true }

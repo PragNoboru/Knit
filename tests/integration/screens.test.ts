@@ -167,10 +167,44 @@ describe("screen functions", () => {
       title: "Later",
       day: "2026-10-07",
     });
+    for (const [title, day] of [
+      ["Later still", "2026-10-08"],
+      ["Last", "2026-10-09"],
+      ["Too late", "2026-10-12"],
+    ])
+      await createPlannedTask(db(), {
+        trackerId,
+        assignees: [me],
+        title: title!,
+        day: day!,
+      });
     const view = DayViewData.parse(
       await call(me, "select day_view($1) as v", [TODAY]),
     );
-    expect(view.upcoming.map((c) => c.title)).toEqual(["Window", "Later"]);
+    // N18(b): the window is already under Ongoing today, so the three offers are others.
+    expect(titles(view.ongoing)).toContain("Window");
+    expect(view.upcoming.map((c) => c.title)).toEqual([
+      "Later",
+      "Later still",
+      "Last",
+    ]);
+  });
+
+  it("a past day does not list early completions of later days (N18 a)", async () => {
+    await setToday(db(), "2026-09-29");
+    const past = DayViewData.parse(
+      await call(me, "select day_view($1) as v", [TODAY]),
+    );
+    expect(past.earlyDone).toEqual([]);
+    const today = DayViewData.parse(
+      await call(me, "select day_view($1) as v", ["2026-09-29"]),
+    );
+    expect(today.earlyDone).toEqual([]);
+    await setToday(db(), TODAY);
+    const onItsDay = DayViewData.parse(
+      await call(me, "select day_view($1) as v", [TODAY]),
+    );
+    expect(titles(onItsDay.earlyDone)).toEqual(["Early"]);
   });
 
   it("refuses callers who are signed out or deactivated", async () => {

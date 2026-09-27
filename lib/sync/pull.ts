@@ -1,7 +1,12 @@
 import { calendarFromDays } from "@/lib/domain/calendar";
+import type { TrackerConfig } from "@/lib/domain/config";
 import { aliasMap } from "@/lib/domain/owners";
-import { planPull, type PullPlan } from "@/lib/domain/planPull";
-import { isEmptyRow, normaliseRow } from "@/lib/domain/rows";
+import { planPull, type PlanTask, type PullPlan } from "@/lib/domain/planPull";
+import {
+  isEmptyRow,
+  normaliseRow,
+  type NormalisedRow,
+} from "@/lib/domain/rows";
 import {
   KNIT_ID_HEADER,
   type SheetSource,
@@ -18,6 +23,11 @@ import { checkStructure } from "./structure";
  * structure, secures Knit IDs, normalises rows, plans and applies. A plan that went stale
  * (state_version moved, or midnight passed) is recomputed, up to three times. Running it twice
  * gives the same result (invariant 8).
+ *
+ * Knit's state is loaded before the rows are read, and the rows are read again on every
+ * attempt, so the rows are never older than the state they are merged with: a write-back that
+ * lands while the pull runs is either in the rows it reads, or still counts as a change made in
+ * Knit (10.3), and is never mistaken for a change in the sheet.
  */
 
 export interface PullDeps {
@@ -44,6 +54,50 @@ function sameInstant(a: string | null, b: string | null): boolean {
   return (
     a !== null && b !== null && new Date(a).getTime() === new Date(b).getTime()
   );
+}
+
+/**
+ * 10.3, 15: a conflict needs the sheet to disagree with Knit. When Knit's own write-back is
+ * already in the sheet but its push has not recorded it yet (the pull ran between the write
+ * and push_result, or the push was stopped there), the sheet says what Knit says: no conflict
+ * item. The write-back still goes out (the plan keeps it) and records the snapshot.
+ */
+export function withoutSelfConflicts(
+  plan: PullPlan,
+  tasks: readonly PlanTask[],
+  rows: readonly NormalisedRow[],
+  config: TrackerConfig,
+): PullPlan {
+  const taskById = new Map(tasks.map((task) => [task.id, task]));
+  const rowById = new Map(rows.map((row) => [row.knitId, row]));
+  const agrees = (taskId: string | null) => {
+    const task = taskId ? taskById.get(taskId) : undefined;
+    const row = taskId ? rowById.get(taskId) : undefined;
+    return (
+      task !== undefined &&
+      row !== undefined &&
+      task.hubChanged &&
+      row.status.mapped &&
+      row.status.status === task.status &&
+      (!config.columns.completedOn ||
+        row.snapshot.completedOn === task.completedOn)
+    );
+  };
+  const dropped = plan.attention.filter(
+    (item) =>
+      item.kind === "conflict" &&
+      item.detail.reason === undefined &&
+      agrees(item.taskId),
+  );
+  if (dropped.length === 0) return plan;
+  return {
+    ...plan,
+    attention: plan.attention.filter((item) => !dropped.includes(item)),
+    stats: {
+      ...plan.stats,
+      conflicts: plan.stats.conflicts - dropped.length,
+    },
+  };
 }
 
 export async function pullTracker(
@@ -93,33 +147,74 @@ export async function pullTracker(
       return { tracker: tracker.id, outcome: "paused", reason: problem.reason };
     }
 
-    const readRows = async () =>
-      (await source.readRows(ref, config.headerRow)).filter(
-        (row) => !isEmptyRow(row, config),
+    // 7.4: tabs are found by gid, so a renamed tab keeps syncing; its new name is picked up.
+    // Only the name shown on the admin screens depends on it, so it never stops a pull.
+    try {
+      const tab = (await source.listTabs(tracker.fileId)).find(
+        (t) => t.sheetId === tracker.sheetGid,
       );
-    const identity = await ensureKnitIds(
-      source,
-      ref,
-      config,
-      await readRows(),
-      (ids) => store.knitIdsElsewhere(tracker.id, ids),
-      readRows,
-    );
-    for (const item of identity.attention) {
-      await store.raiseAttention(
-        tracker.id,
-        null,
-        item.kind,
-        item.dedupeKey,
-        item.detail,
-      );
+      if (tab && tab.title !== tracker.tabName) {
+        await store.recordTabName(tracker.id, tab.title);
+      }
+    } catch (error) {
+      logEvent("pull.tab_name_failed", {
+        job: "pull",
+        tracker: tracker.id,
+        run: runId,
+        error: errorSummary(error),
+      });
     }
 
     const context = await store.loadContext();
     const calendar = calendarFromDays(context.calendar);
     const aliases = aliasMap(context.aliases);
+    const readRows = async () =>
+      (await source.readRows(ref, config.headerRow)).filter(
+        (row) => !isEmptyRow(row, config),
+      );
+    let idsWritten = 0;
+    let idsCleared = 0;
+    let idsRestored = 0;
 
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
+      const state = await store.loadPullState(tracker.id);
+      const identity = await ensureKnitIds(
+        source,
+        ref,
+        config,
+        await readRows(),
+        (ids) => store.knitIdsElsewhere(tracker.id, ids),
+        readRows,
+      );
+      idsWritten += identity.written;
+      idsCleared += identity.cleared;
+      idsRestored += identity.restored;
+      for (const item of identity.attention) {
+        await store.raiseAttention(
+          tracker.id,
+          null,
+          item.kind,
+          item.dedupeKey,
+          item.detail,
+        );
+      }
+      if (identity.unstable) {
+        // Invariant 7: a Knit ID was overwritten while rows moved and could not be put back.
+        // These rows would count its task as removed, so nothing is applied this time.
+        await store.finishRun(
+          runId,
+          false,
+          { outcome: "stale", idsWritten, idsCleared, idsRestored },
+          "rows moved while Knit IDs were written",
+        );
+        logEvent("pull.unstable", {
+          job: "pull",
+          tracker: tracker.id,
+          run: runId,
+        });
+        return { tracker: tracker.id, outcome: "stale" };
+      }
+
       const today = await store.today();
       const rows = identity.rows.map((row) =>
         normaliseRow(row, {
@@ -131,13 +226,17 @@ export async function pullTracker(
           knitIdHeader: KNIT_ID_HEADER,
         }),
       );
-      const state = await store.loadPullState(tracker.id);
-      const plan = planPull(state.tasks, rows, {
-        trackerId: tracker.id,
-        goLiveDate: tracker.goLiveDate,
-        today,
+      const plan = withoutSelfConflicts(
+        planPull(state.tasks, rows, {
+          trackerId: tracker.id,
+          goLiveDate: tracker.goLiveDate,
+          today,
+          config,
+        }),
+        state.tasks,
+        rows,
         config,
-      });
+      );
       const applied = await store.applyPullPlan(
         tracker.id,
         state.stateVersion,
@@ -146,11 +245,7 @@ export async function pullTracker(
         modifiedTime,
       );
       if (applied.result === "applied") {
-        const stats = {
-          ...plan.stats,
-          idsWritten: identity.written,
-          idsCleared: identity.cleared,
-        };
+        const stats = { ...plan.stats, idsWritten, idsCleared, idsRestored };
         await store.finishRun(runId, true, { outcome: "pulled", ...stats });
         logEvent("pull.done", {
           job: "pull",
@@ -162,8 +257,8 @@ export async function pullTracker(
           tracker: tracker.id,
           outcome: "pulled",
           stats: plan.stats,
-          idsWritten: identity.written,
-          idsCleared: identity.cleared,
+          idsWritten,
+          idsCleared,
         };
       }
     }

@@ -23,6 +23,7 @@ export const ATTENTION_TITLES: Record<string, string> = {
   row_not_found: "Row not found",
   member_report: "Report from a member",
   calendar_ending: "Calendar ending",
+  write_misplaced: "Write may be on the wrong row",
 };
 
 const DATE_REASONS: Record<string, string> = {
@@ -88,6 +89,12 @@ export function describeAttention(
       return `${reporter ?? "A member"} reported: "${str(detail.text)}"`;
     case "calendar_ending":
       return `The working-day calendar ends on ${day(detail.last)}. Extend it on the Holidays page.`;
+    case "write_misplaced":
+      if (detail.reason === "knit_id_lost")
+        return `Rows moved while Knit was adding Knit IDs, and the Knit ID of row ${str(detail.row)} could not be put back. Its task may show as removed and come back as a new one.`;
+      if (detail.reason === "unverified")
+        return `Knit wrote to rows ${Array.isArray(detail.rows) ? detail.rows.map(str).join(", ") : ""} but could not read them back to check. If rows were moved just then, check those rows.`;
+      return `Rows moved while Knit was writing, so row ${str(detail.row)} got values meant for another task (${Array.isArray(detail.headers) ? detail.headers.map(str).join(", ") : ""}). Knit could not undo them: check that row.`;
     default:
       return kind;
   }

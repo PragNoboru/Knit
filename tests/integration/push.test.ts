@@ -1,10 +1,12 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
+import type { SheetRow } from "@/lib/domain/rows";
 import { MemorySheetSource, type MemoryFile } from "@/lib/sheets/memory";
 import type { CellWrite, TabRef } from "@/lib/sheets/types";
 import { loadXlsxFile } from "@/lib/sheets/xlsx";
 import { pullTracker } from "@/lib/sync/pull";
 import { pushDue } from "@/lib/sync/push";
+import { toSheetsSerial } from "@/lib/time";
 
 import {
   createUser,
@@ -86,6 +88,35 @@ describe("push (PRD 10.4)", () => {
   });
 
   const push = () => pushDue({ store: storeFor(db()), source });
+  const pull = async () => {
+    const store = storeFor(db());
+    const [tracker] = await store.trackers({ ids: [ctx.trackerId] });
+    return pullTracker({ store, source }, tracker!, { force: true });
+  };
+  /** Starts again on a fresh copy of the tracker; `before` edits the sheet before the first pull. */
+  const restart = async (
+    configOverride: Record<string, unknown> = {},
+    before: (ref: TabRef) => Promise<void> = async () => {},
+  ) => {
+    file = loadXlsxFile(FIXTURE);
+    source = new MemorySheetSource([file]);
+    await db().query("rollback");
+    await db().query("begin");
+    await setToday(db(), TODAY);
+    await before({ fileId: file.id, sheetId: 0 });
+    ctx = await setup(db(), source, file, configOverride);
+  };
+  const statusOf = async (id: string) =>
+    (
+      await db().query<{ status: string }>(
+        "select status::text from tasks where id = $1",
+        [id],
+      )
+    )[0]!.status;
+  const conflicts = () =>
+    db().query(
+      "select count(*)::int as n from attention_items where kind = 'conflict'",
+    );
   const setStatus = (
     id: string,
     status: string,
@@ -271,5 +302,302 @@ describe("push (PRD 10.4)", () => {
     expect(
       rows.filter((r) => r.cells["knit note"]?.formatted !== ""),
     ).toHaveLength(0);
+  });
+
+  it("race: a pasted copy of a task's row (Knit ID included) gets no write; after the next pull the write lands on the task's own row (14)", async () => {
+    const g01 = await taskId(db(), "G01");
+    const tab = file.tabs[0]!;
+    // Someone copies G01's whole row, hidden Knit ID included, and pastes it at the bottom.
+    await source.insertRow(
+      ctx.ref,
+      tab.rows.length + 1,
+      tab.rows[1]!.map((cell) => ({ ...cell })),
+    );
+    await setStatus(g01, "done");
+    expect(await push()).toMatchObject({ claimed: 1, done: 0, retried: 1 });
+    const doneRows = async () =>
+      (await source.readRows(ctx.ref, 1))
+        .filter((r) => r.cells.status?.formatted === "Done")
+        .map((r) => r.rowNumber);
+    expect(await doneRows()).toEqual([]);
+
+    // The next pull gives the lower row a new ID; the retry then writes to G01's own row.
+    await pull();
+    await db().query(
+      "update outbox set next_attempt_at = now() where state = 'pending'",
+    );
+    expect(await push()).toMatchObject({ done: 1 });
+    expect(await doneRows()).toEqual([2]);
+    expect(await statusOf(g01)).toBe("done");
+  });
+
+  it("a note-only write-back never absorbs a status changed in the sheet (N17, 10.3)", async () => {
+    const g01 = await taskId(db(), "G01");
+    await source.setCell(ctx.ref, 1, 2, "Status", "Done");
+    await db().query(
+      `insert into outbox (task_id, tracker_id, payload) values ($1, $2, '{"note_only": true}')`,
+      [g01, ctx.trackerId],
+    );
+    expect(await push()).toMatchObject({ done: 1 });
+    await pull();
+    expect(await statusOf(g01)).toBe("done");
+    expect(
+      await db().query(
+        "select origin::text, new_value from events where task_id = $1 and field = 'status'",
+        [g01],
+      ),
+    ).toEqual([{ origin: "source", new_value: "done" }]);
+  });
+
+  it("a status the tracker cannot express (N8) does not absorb a status changed in the sheet (10.3)", async () => {
+    const config = fixtureTrackerConfig(FILING_BUDDY_GOOGLE_ADS) as {
+      writeBack: Record<string, string | null>;
+    };
+    await restart({ writeBack: { ...config.writeBack, blocked: null } });
+    const g01 = await taskId(db(), "G01");
+    // Someone marks G01 done in the sheet; before the next pull, Knit sets it Blocked.
+    await source.setCell(ctx.ref, 1, 2, "Status", "Done");
+    await setStatus(g01, "blocked", "Waiting for T3");
+    await push(); // writes only the Knit Note (N8)
+    const [task] = await db().query<{ source_snapshot: unknown }>(
+      "select source_snapshot from tasks where id = $1",
+      [g01],
+    );
+    expect(task!.source_snapshot).toEqual({
+      statusKey: "not started",
+      completedOn: null,
+    });
+    // The sheet's Done is a change in the sheet the next pull still sees.
+    await pull();
+    expect(await statusOf(g01)).toBe("done");
+  });
+
+  it("leaves a completed-on value a person typed beside another status alone (10.4 step 4)", async () => {
+    await restart({}, async (ref) => {
+      await source.setCell(ref, 1, 2, "Status", "In progress");
+      await source.setCell(ref, 1, 2, "Done on", "Fri 25 Sep");
+    });
+    const g01 = await taskId(db(), "G01");
+    await setStatus(g01, "blocked", "Waiting for T3");
+    expect(await push()).toMatchObject({ done: 1 });
+    expect(await sheetRow(source, ctx.ref, g01)).toEqual({
+      status: "Blocked",
+      doneOn: "Fri 25 Sep",
+      note: "Blocked: Waiting for T3",
+    });
+  });
+
+  it("race: a write-back superseded while its push is in flight lands last: the newest is queued again and the pull keeps Knit's status (10.4 step 1)", async () => {
+    let reached!: () => void;
+    let release!: () => void;
+    const atWrite = new Promise<void>((resolve) => (reached = resolve));
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    class HeldWrite extends MemorySheetSource {
+      held = true;
+      override async writeCells(
+        ref: TabRef,
+        headerRow: number,
+        cells: CellWrite[],
+      ) {
+        if (this.held) {
+          this.held = false;
+          reached();
+          await gate; // this push is slow (a 429 backoff, other trackers first)
+        }
+        await super.writeCells(ref, headerRow, cells);
+      }
+    }
+    const g01 = await taskId(db(), "G01");
+    await setStatus(g01, "in_progress");
+    const slow = pushDue({
+      store: storeFor(db()),
+      source: new HeldWrite(source.files),
+    });
+    await atWrite;
+    await setStatus(g01, "done"); // supersedes the In progress write-back in flight
+    expect(await push()).toMatchObject({ done: 1 });
+    release();
+    expect(await slow).toMatchObject({ done: 1 });
+    expect((await sheetRow(source, ctx.ref, g01)).status).toBe("In progress");
+
+    await pull();
+    expect(await statusOf(g01)).toBe("done");
+    expect(await conflicts()).toEqual([{ n: 0 }]);
+    expect(await push()).toMatchObject({ done: 1 });
+    expect(await sheetRow(source, ctx.ref, g01)).toEqual({
+      status: "Done",
+      doneOn: "Mon 28 Sep",
+      note: "Done on Mon 28 Sep",
+    });
+  });
+
+  it("race: a write-back that lands while a pull reads the rows is never taken for a change in the sheet (10.3, 9.1)", async () => {
+    const g01 = await taskId(db(), "G01");
+    await setStatus(g01, "done");
+    const store = storeFor(db());
+    class PushWhilePullReads extends MemorySheetSource {
+      armed = true;
+      override async readRows(
+        ref: TabRef,
+        headerRow: number,
+      ): Promise<SheetRow[]> {
+        const rows = await super.readRows(ref, headerRow);
+        if (this.armed) {
+          this.armed = false;
+          // The immediate push writes, verifies and records right after the pull read.
+          await pushDue({ store, source: this });
+        }
+        return rows;
+      }
+    }
+    source = new PushWhilePullReads(source.files);
+    expect(await pull()).toMatchObject({ outcome: "pulled" });
+    expect(await statusOf(g01)).toBe("done");
+    expect(
+      await db().query(
+        "select origin::text from events where task_id = $1 and field = 'status'",
+        [g01],
+      ),
+    ).toEqual([{ origin: "hub" }]);
+    expect(await conflicts()).toEqual([{ n: 0 }]);
+  });
+
+  /** The sheet takes the write, then cannot be read back for a moment (Google 5xx). */
+  class NoReadBack extends MemorySheetSource {
+    failReads = 0;
+    armed = true;
+    override async writeCells(
+      ref: TabRef,
+      headerRow: number,
+      cells: CellWrite[],
+    ) {
+      await super.writeCells(ref, headerRow, cells);
+      if (this.armed) {
+        this.armed = false;
+        this.failReads = 2;
+      }
+    }
+    override async readRows(
+      ref: TabRef,
+      headerRow: number,
+    ): Promise<SheetRow[]> {
+      if (this.failReads > 0) {
+        this.failReads -= 1;
+        throw new Error("Sheets API 503");
+      }
+      return super.readRows(ref, headerRow);
+    }
+  }
+
+  it("a write that cannot be read back is reported with the rows it went to (10.4 step 5, invariant 7)", async () => {
+    source = new NoReadBack(source.files);
+    const g01 = await taskId(db(), "G01");
+    await setStatus(g01, "done");
+    expect(await push()).toMatchObject({ retried: 1, done: 0 });
+    expect(
+      await db().query("select kind, detail from attention_items"),
+    ).toEqual([
+      {
+        kind: "write_misplaced",
+        detail: { reason: "unverified", rows: [2] },
+      },
+    ]);
+  });
+
+  it("a pull between a push's write and its result raises no conflict: the sheet already says what Knit says (10.3, 15)", async () => {
+    const sheet = new NoReadBack(source.files);
+    source = sheet;
+    const g01 = await taskId(db(), "G01");
+    await setStatus(g01, "done");
+    expect(await push()).toMatchObject({ retried: 1 });
+    sheet.failReads = 0; // the sheet reads fine again when the pull runs
+    expect(await pull()).toMatchObject({ stats: { conflicts: 0 } });
+    expect(await conflicts()).toEqual([{ n: 0 }]);
+
+    await db().query(
+      "update outbox set next_attempt_at = now() where state = 'pending'",
+    );
+    expect(await push()).toMatchObject({ done: 1 });
+    const [task] = await db().query<{ source_snapshot: unknown }>(
+      "select source_snapshot from tasks where id = $1",
+      [g01],
+    );
+    expect(task!.source_snapshot).toEqual({
+      statusKey: "done",
+      completedOn: TODAY,
+    });
+    expect(await conflicts()).toEqual([{ n: 0 }]);
+  });
+
+  it("race: a write that lands on a row without a Knit ID is reported, never 'undone' with another row's values", async () => {
+    // A row added since the last pull (no Knit ID yet), marked Blocked.
+    await source.setCell(ctx.ref, 1, 36, "Task", "Added after the pull");
+    await source.setCell(ctx.ref, 1, 36, "Status", "Blocked");
+    class InsertBeforeWrite extends MemorySheetSource {
+      armed = true;
+      override async writeCells(
+        ref: TabRef,
+        headerRow: number,
+        cells: CellWrite[],
+      ) {
+        if (this.armed) {
+          this.armed = false;
+          await this.insertRow(ref, 2, []); // a new row at the top as the write goes out
+        }
+        await super.writeCells(ref, headerRow, cells);
+      }
+    }
+    source = new InsertBeforeWrite(source.files);
+    const g01 = await taskId(db(), "G01");
+    await setStatus(g01, "done");
+    expect(await push()).toMatchObject({ retried: 1, done: 0 });
+    const rows = await source.readRows(ctx.ref, 1);
+    const landed = rows.find((r) => r.rowNumber === 2)!;
+    expect(landed.cells.status?.formatted).toBe("Done");
+    expect(
+      await db().query("select kind, detail from attention_items"),
+    ).toEqual([
+      {
+        kind: "write_misplaced",
+        detail: {
+          reason: "stray_write",
+          row: 2,
+          headers: ["Status", "Done on", "Knit Note"],
+        },
+      },
+    ]);
+  });
+
+  it("race: a write undone on another task's row puts its date back as a date", async () => {
+    await restart({ completedOnFormat: { type: "date" } });
+    const serial = toSheetsSerial("2026-09-25");
+    await source.setCell(ctx.ref, 1, 3, "Done on", serial); // G02 already has a real date
+    class SwapBeforeWrite extends MemorySheetSource {
+      armed = true;
+      override async writeCells(
+        ref: TabRef,
+        headerRow: number,
+        cells: CellWrite[],
+      ) {
+        if (this.armed) {
+          this.armed = false;
+          // Someone swaps rows 2 and 3 just before the write lands.
+          const rows = this.tab(ref).rows;
+          [rows[1], rows[2]] = [rows[2]!, rows[1]!];
+        }
+        await super.writeCells(ref, headerRow, cells);
+      }
+    }
+    source = new SwapBeforeWrite(source.files);
+    const g01 = await taskId(db(), "G01");
+    await setStatus(g01, "done");
+    expect(await push()).toMatchObject({ retried: 1 });
+    const g02 = (await source.readRows(ctx.ref, 1)).find(
+      (r) => r.cells.id?.formatted === "G02",
+    )!;
+    expect(g02.rowNumber).toBe(2);
+    expect(g02.cells["done on"]!.value).toBe(serial);
+    expect(g02.cells.status!.formatted).toBe("Not started");
+    expect(g02.cells["knit note"]!.formatted).toBe("");
   });
 });

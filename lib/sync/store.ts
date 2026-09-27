@@ -61,6 +61,8 @@ export interface SyncStore {
     trackerId: string,
   ): Promise<{ stateVersion: number; tasks: PlanTask[] }>;
   knitIdsElsewhere(trackerId: string, ids: string[]): Promise<string[]>;
+  /** PRD 7.4: the tab's current name, picked up by the pull (tabs are found by gid). */
+  recordTabName(trackerId: string, tabName: string): Promise<void>;
   applyPullPlan(
     trackerId: string,
     expectedStateVersion: number,
@@ -87,10 +89,11 @@ export interface SyncStore {
   ): Promise<void>;
   /** PRD 10.4: claims due write-backs (see push_claim). */
   pushClaim(limit: number, taskId: string | null): Promise<unknown[]>;
+  /** 10.4 step 5. `snapshot` holds only the mapped cells the push wrote (10.3). */
   pushResult(
     outboxId: string,
     ok: boolean,
-    snapshot: SourceSnapshot | null,
+    snapshot: Partial<SourceSnapshot> | null,
     error: string | null,
     statusRaw?: string | null,
   ): Promise<void>;
@@ -162,6 +165,12 @@ export function createSyncStore(rpc: Rpc): SyncStore {
             p_tracker_id: trackerId,
             p_ids: ids,
           })) as string[]),
+    recordTabName: async (trackerId, tabName) => {
+      await rpc("record_tab_name", {
+        p_tracker_id: trackerId,
+        p_tab_name: tabName,
+      });
+    },
     applyPullPlan: async (
       trackerId,
       expectedStateVersion,

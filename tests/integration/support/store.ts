@@ -18,6 +18,7 @@ const SIGNATURES: Record<
     args: { p_tracker_id: "uuid", p_ids: "uuid[]" },
     returns: "text[]",
   },
+  record_tab_name: { args: { p_tracker_id: "uuid", p_tab_name: "text" } },
   apply_pull_plan: {
     args: {
       p_tracker_id: "uuid",

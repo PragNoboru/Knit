@@ -42,6 +42,31 @@ describe("Needs Attention texts (12.8)", () => {
     );
   });
 
+  it("says which rows to check when rows moved under a write", () => {
+    expect(
+      describeAttention("write_misplaced", {
+        reason: "stray_write",
+        row: 2,
+        headers: ["Status", "Done on", "Knit Note"],
+      }),
+    ).toBe(
+      "Rows moved while Knit was writing, so row 2 got values meant for another task (Status, Done on, Knit Note). Knit could not undo them: check that row.",
+    );
+    expect(
+      describeAttention("write_misplaced", {
+        reason: "unverified",
+        rows: [2, 5],
+      }),
+    ).toBe(
+      "Knit wrote to rows 2, 5 but could not read them back to check. If rows were moved just then, check those rows.",
+    );
+    expect(
+      describeAttention("write_misplaced", { reason: "knit_id_lost", row: 35 }),
+    ).toBe(
+      "Rows moved while Knit was adding Knit IDs, and the Knit ID of row 35 could not be put back. Its task may show as removed and come back as a new one.",
+    );
+  });
+
   it("finds the row an item is about", () => {
     expect(attentionRow({ row: 7 }, 3)).toBe(7);
     expect(attentionRow({}, 3)).toBe(3);

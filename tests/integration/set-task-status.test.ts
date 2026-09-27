@@ -468,6 +468,78 @@ describe("set_task_status (PRD 9.1, 6.1, 6.5, D2, D3)", () => {
       );
       expect(outbox).toEqual([{ n: 1 }]);
     });
+
+    it("refuses to reopen a finished task once its completion day has closed (6.5, N15)", async () => {
+      const done = await createTask(db(), {
+        trackerId,
+        assignees: [member],
+        dateKind: "open",
+        plannedStart: "2026-09-28",
+      });
+      const cancelled = await createTask(db(), {
+        trackerId,
+        assignees: [member],
+        dateKind: "open",
+        plannedStart: "2026-09-28",
+      });
+      await setStatus(db(), as(member), done, "done");
+      await setStatus(db(), as(member), cancelled, "cancelled", "Not needed");
+      // The next day, after Wed 30 Sep has closed.
+      await setToday(db(), "2026-10-01");
+      await queryAs(db(), { kind: "service" }, "select close_day($1)", [TODAY]);
+      const writeBacks = () =>
+        db().query(
+          "select count(*)::int as n from outbox where task_id in ($1, $2) and not (payload ? 'note_only')",
+          [done, cancelled],
+        );
+      const before = await writeBacks();
+
+      await expect(
+        setStatus(db(), as(member), done, "in_progress"),
+      ).rejects.toMatchObject({ message: "task_day_locked" });
+      await expect(
+        setStatus(db(), as(member), cancelled, "done"),
+      ).rejects.toMatchObject({ message: "task_day_locked" });
+      expect(await writeBacks()).toEqual(before);
+      expect(await taskDays(db(), cancelled)).toHaveLength(1);
+      // Setting the status it already has still changes nothing (9.1).
+      await expect(
+        setStatus(db(), as(member), done, "done"),
+      ).resolves.toMatchObject({ task: { status: "done" } });
+    });
+  });
+
+  describe("early completions wait for their day's close (6.4, 6.5, N10)", () => {
+    it("refuses to change a task-day done early yesterday until yesterday closes, then freezes it", async () => {
+      const { taskId } = await createPlannedTask(db(), {
+        trackerId,
+        assignees: [member],
+        day: "2026-10-05",
+      });
+      await setStatus(db(), as(member), taskId, "done"); // Wed 30 Sep, early
+
+      // Thu 1 Oct, 00:05: the close of Wed 30 Sep has not run yet.
+      await setToday(db(), "2026-10-01");
+      await expect(
+        setStatus(db(), as(member), taskId, "in_progress"),
+      ).rejects.toMatchObject({ message: "day_not_closed" });
+
+      const [stats] = await queryAs<{ stats: Record<string, unknown> }>(
+        db(),
+        { kind: "service" },
+        "select close_day($1) as stats",
+        [TODAY],
+      );
+      expect(stats!.stats).toMatchObject({ early_completions_locked: 1 });
+      expect(await taskDays(db(), taskId)).toMatchObject([
+        {
+          day: "2026-10-05",
+          status: "done",
+          status_changed_on: TODAY,
+          locked: true,
+        },
+      ]);
+    });
   });
 
   it("is atomic: a refused call leaves no trace", async () => {

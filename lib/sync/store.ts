@@ -38,7 +38,10 @@ export interface SyncContext {
 export type ApplyResult =
   { result: "applied"; stats: PullPlan["stats"] } | { result: "retry" };
 
-/** What close_day returns (PRD 6.4, 19). */
+/**
+ * What close_day returns (PRD 6.4, 19): what closing D did, kept with D so a second call
+ * returns the same, and the Knit Note refreshes it queued (N17).
+ */
 export interface CloseDayStats {
   day: LocalDate;
   next_working_day: LocalDate;
@@ -47,6 +50,7 @@ export interface CloseDayStats {
   blocked: number;
   spillovers: number;
   early_completions_locked: number;
+  notes_queued: number;
   task_ids: string[];
 }
 
@@ -102,6 +106,9 @@ export interface SyncStore {
     stats: Record<string, unknown>,
   ): Promise<void>;
   failDayClosure(day: LocalDate, error: string): Promise<void>;
+  /** 10.5 step 2: the trackers the close of D has already force-pulled, in any call. */
+  closurePulledTrackers(day: LocalDate): Promise<string[]>;
+  recordClosurePull(day: LocalDate, trackerId: string): Promise<void>;
   closeDay(day: LocalDate): Promise<CloseDayStats>;
   enqueueNoteRefresh(taskIds: string[]): Promise<number>;
   archiveRows(
@@ -227,6 +234,14 @@ export function createSyncStore(rpc: Rpc): SyncStore {
     },
     failDayClosure: async (day, error) => {
       await rpc("fail_day_closure", { p_day: day, p_error: error });
+    },
+    closurePulledTrackers: async (day) =>
+      (
+        ((await rpc("close_pulled_trackers", { p_day: day })) as
+          string[] | null) ?? []
+      ).map(String),
+    recordClosurePull: async (day, trackerId) => {
+      await rpc("record_close_pull", { p_day: day, p_tracker_id: trackerId });
     },
     closeDay: async (day) =>
       (await rpc("close_day", { p_day: day })) as CloseDayStats,

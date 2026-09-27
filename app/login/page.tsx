@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 
 import { LoginForm } from "@/components/login-form";
 import { getCurrentUser, getSupabase } from "@/lib/supabase/server";
-import { firstParam } from "@/lib/url";
+import { firstParam, safeNextPath } from "@/lib/url";
 
 export const metadata: Metadata = { title: "Sign in · Knit" };
 
@@ -14,9 +14,8 @@ export default async function LoginPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const params = await searchParams;
-  const next = firstParam(params, "next");
-  const safeNext =
-    next && next.startsWith("/") && !next.startsWith("//") ? next : undefined;
+  // 9.3: only a path inside Knit, never another site (an open redirect).
+  const safeNext = safeNextPath(firstParam(params, "next"));
   if (await getCurrentUser()) redirect(safeNext ?? "/");
 
   // Signed in to Supabase but not an active Knit user: the admin deactivated the account.

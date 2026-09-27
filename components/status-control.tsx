@@ -14,6 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { callAction } from "@/lib/actions/call";
 import { pullForward, setTaskStatus } from "@/lib/actions/tasks";
 import type { SyncState } from "@/lib/domain/cards";
 import {
@@ -60,7 +61,9 @@ export function StatusControl({
     startTransition(async () => {
       setShown(next);
       const action = pull ? pullForward : setTaskStatus;
-      const result = await action({ taskId, status: next, reason });
+      const result = await callAction(() =>
+        action({ taskId, status: next, reason }),
+      );
       if (!result.ok) setError(result.error);
       else setSyncState(result.data.sync);
     });

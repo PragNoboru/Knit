@@ -2,7 +2,7 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
 import { getPublicEnv } from "@/lib/public-env";
-import { authCookieOptions } from "@/lib/supabase/cookies";
+import { authCookieOptions, withSessionMaxAge } from "@/lib/supabase/cookies";
 
 /**
  * PRD 9.3, 12.1: keeps the Supabase session fresh on every page request and sends signed-out
@@ -24,7 +24,7 @@ export async function proxy(request: NextRequest) {
           for (const { name, value } of toSet) request.cookies.set(name, value);
           response = NextResponse.next({ request });
           for (const { name, value, options } of toSet)
-            response.cookies.set(name, value, options);
+            response.cookies.set(name, value, withSessionMaxAge(options));
           for (const [key, value] of Object.entries(headers))
             response.headers.set(key, value);
         },
@@ -35,6 +35,11 @@ export async function proxy(request: NextRequest) {
   const { data } = await supabase.auth.getClaims();
   const { pathname, search } = request.nextUrl;
   if (data?.claims.sub || pathname === "/login") return response;
+  // A server action call is not redirected: every action checks the user itself and answers
+  // "Your session has ended. Sign in again." in plain language, where a redirect would reach
+  // the page as a failed request.
+  if (request.method === "POST" && request.headers.has("next-action"))
+    return response;
 
   const login = request.nextUrl.clone();
   login.pathname = "/login";

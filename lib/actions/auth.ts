@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 
 import { getSupabase } from "@/lib/supabase/server";
+import { safeNextPath } from "@/lib/url";
 
 // PRD 13: signIn and signOut (Supabase Auth, email and password, D6).
 
@@ -16,11 +17,6 @@ const SignInInput = z.object({
   password: z.string().min(1).max(200),
   next: z.string().max(2000).optional(),
 });
-
-/** Only paths inside Knit: never another site (an open redirect). */
-function safeNext(next: string | undefined): string {
-  return next && next.startsWith("/") && !next.startsWith("//") ? next : "/";
-}
 
 export async function signIn(
   _previous: SignInState,
@@ -54,7 +50,8 @@ export async function signIn(
     await supabase.auth.signOut({ scope: "local" });
     return { error: "This account is not active. Ask the admin." };
   }
-  redirect(safeNext(parsed.data.next));
+  // 9.3: only a path inside Knit, never another site (an open redirect).
+  redirect(safeNextPath(parsed.data.next) ?? "/");
 }
 
 export async function signOut(): Promise<void> {

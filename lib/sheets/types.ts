@@ -28,6 +28,12 @@ export interface TabRef {
   sheetId: number;
 }
 
+/**
+ * A tab that can hold a tracker: a grid sheet (chart and data-source sheets are never listed).
+ * rowCount and columnCount are the tab's grid size: every row and column that exists, empty or
+ * not (Google's gridProperties; a new Google tab is 1000 x 26). An in-memory tab's grid is
+ * exactly the rows and columns it stores.
+ */
 export interface TabInfo {
   sheetId: number;
   title: string;
@@ -52,7 +58,10 @@ export interface ColumnValidation {
 
 export interface TabStructure {
   headers: ColumnInfo[];
-  /** Normalised headers of columns whose data cells hold formulas (N6). */
+  /**
+   * Normalised headers of formula columns (N6): a data cell holds a formula or is filled by an
+   * array formula, or the header cell itself is (an array formula anchored in the header).
+   */
   formulaColumns: string[];
   /** Dropdown rules on data cells, by normalised header (6.8, 11 step 5). */
   validations: Record<string, ColumnValidation>;
@@ -82,7 +91,11 @@ export interface SheetSource {
     headerRow: number,
     header: string,
   ): Promise<{ row: number; value: string }[]>;
-  /** Adds the Knit ID and Knit Note columns if missing (11 step 9). */
+  /**
+   * Adds the Knit ID and Knit Note columns if missing (11 step 9), at the first columns after
+   * the last used header that are empty in every row from the header row down, so no cell of
+   * the tracker is ever overwritten (invariants 5, 6).
+   */
   ensureKnitColumns(
     ref: TabRef,
     headerRow: number,
@@ -100,6 +113,8 @@ export class SheetError extends Error {
       | "header_not_found"
       | "read_only"
       | "api_error",
+    /** The HTTP status of a Google answer, when there was one. */
+    readonly status?: number,
   ) {
     super(message);
   }

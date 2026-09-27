@@ -27,6 +27,7 @@ import {
  */
 
 export interface MemoryCell extends CellValue {
+  /** The formula, or `{array <range>}` for a cell filled by an array formula (N6). */
   formula?: string;
 }
 
@@ -102,6 +103,7 @@ export class MemorySheetSource implements SheetSource {
     return this.file(fileId).modifiedTime;
   }
 
+  /** Every tab is a grid, and its grid is exactly the rows and columns it stores (TabInfo). */
   async listTabs(fileId: string): Promise<TabInfo[]> {
     return this.file(fileId).tabs.map((tab) => ({
       sheetId: tab.sheetId,
@@ -126,8 +128,10 @@ export class MemorySheetSource implements SheetSource {
       if (seen.has(h.normalised)) duplicates.add(h.normalised);
       seen.add(h.normalised);
     }
+    // N6, as GoogleSheetSource: a data cell with a formula, or a formula in the header cell
+    // itself (an array formula anchored there fills the column below).
     const formulaColumns = new Set<string>();
-    for (const row of tab.rows.slice(headerRow)) {
+    for (const row of tab.rows.slice(headerRow - 1)) {
       row.forEach((cell, index) => {
         const header = headers.find((h) => h.index === index);
         if (cell?.formula && header) formulaColumns.add(header.normalised);
@@ -184,22 +188,31 @@ export class MemorySheetSource implements SheetSource {
     this.assertWritable();
     const tab = this.tab(ref);
     const headers = this.headers(tab, headerRow);
-    const has = (name: string) =>
-      headers.some((h) => h.normalised === normaliseKey(name));
+    const missing = [KNIT_ID_HEADER, KNIT_NOTE_HEADER].filter(
+      (name) => !headers.some((h) => h.normalised === normaliseKey(name)),
+    );
+    if (missing.length === 0)
+      return { knitIdHeader: KNIT_ID_HEADER, knitNoteHeader: KNIT_NOTE_HEADER };
+    // 11 step 9, as GoogleSheetSource: the first columns after the last used header that are
+    // empty in every row from the header row down (a formula counts as used), so no cell of
+    // the tracker is ever overwritten.
     let next =
-      headers.length === 0 ? 0 : Math.max(...headers.map((h) => h.index)) + 1;
+      tab.rows.slice(headerRow - 1).reduce(
+        (last, row) =>
+          Math.max(
+            last,
+            row.findLastIndex((c) => !isBlank(c)),
+          ),
+        headers.reduce((last, h) => Math.max(last, h.index), -1),
+      ) + 1;
     const headerCells = this.rowAt(tab, headerRow);
-    if (!has(KNIT_ID_HEADER)) {
-      headerCells[next] = { value: KNIT_ID_HEADER, formatted: KNIT_ID_HEADER };
-      tab.hiddenColumns.push(next);
-      tab.protectedColumns.push(next);
+    for (const name of missing) {
+      headerCells[next] = { value: name, formatted: name };
+      if (name === KNIT_ID_HEADER) {
+        tab.hiddenColumns.push(next);
+        tab.protectedColumns.push(next);
+      }
       next += 1;
-    }
-    if (!has(KNIT_NOTE_HEADER)) {
-      headerCells[next] = {
-        value: KNIT_NOTE_HEADER,
-        formatted: KNIT_NOTE_HEADER,
-      };
     }
     await this.changed(ref.fileId);
     return { knitIdHeader: KNIT_ID_HEADER, knitNoteHeader: KNIT_NOTE_HEADER };

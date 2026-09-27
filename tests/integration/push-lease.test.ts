@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { MemorySheetSource } from "@/lib/sheets/memory";
-import type { TabRef } from "@/lib/sheets/types";
+import type { CellWrite, TabRef } from "@/lib/sheets/types";
 import { loadXlsxFile } from "@/lib/sheets/xlsx";
-import { pushTaskUnderLease } from "@/lib/sync/leases";
+import { pushTaskImmediately, pushTaskUnderLease } from "@/lib/sync/leases";
 import { pullTracker } from "@/lib/sync/pull";
 
 import {
@@ -105,5 +105,39 @@ describe("immediate push under the push lease (PRD 7.3, 10.4)", () => {
       result: { done: 1 },
     });
     expect(await statusCell("G01")).toBe("In progress");
+  });
+
+  it("returns only once its leased push has ended, so the lease never outlives the action's work (7.3, N33)", async () => {
+    const store = storeFor(db());
+    const g01 = (
+      await db().query<{ id: string }>(
+        "select id::text from tasks where source_ref = 'G01'",
+      )
+    )[0]!.id;
+    await setStatus(g01, "done");
+    // A slow write (a 429 backoff, in miniature) takes longer than the best-effort budget.
+    class SlowWrite extends MemorySheetSource {
+      override async writeCells(
+        tab: TabRef,
+        headerRow: number,
+        cells: CellWrite[],
+      ) {
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        await super.writeCells(tab, headerRow, cells);
+      }
+    }
+
+    expect(
+      await pushTaskImmediately(
+        { store, source: new SlowWrite(source.files) },
+        g01,
+        { timeoutMs: 20 },
+      ),
+    ).toEqual({ skipped: false, slow: true });
+    // Nothing is left running: the write-back landed and the push lease is free again.
+    expect(await statusCell("G01")).toBe("Done");
+    const holder = await store.acquireLease("push", 60);
+    expect(holder).not.toBeNull();
+    await store.releaseLease("push", holder!);
   });
 });

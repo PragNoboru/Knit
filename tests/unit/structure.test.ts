@@ -3,6 +3,10 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
+import {
+  MISSING_KNIT_ID_REASON,
+  pausedForMissingKnitIds,
+} from "@/lib/admin/pause";
 import { normaliseKey, TrackerConfig } from "@/lib/domain/config";
 import {
   columnLetter,
@@ -100,6 +104,22 @@ describe("checkStructure", () => {
     expect(
       checkStructure(structure([...FILING_BUDDY, KNIT_NOTE_HEADER]), config),
     ).toMatchObject({ kind: "missing_knit_id_column" });
+  });
+
+  it("sends only a missing Knit ID column to the recreate flow, never a doubled one or formulas in it (N39, N43, review R6)", () => {
+    const missing = checkStructure(
+      structure([...FILING_BUDDY, KNIT_NOTE_HEADER]),
+      config,
+    );
+    expect(missing?.reason).toBe(MISSING_KNIT_ID_REASON);
+    expect(pausedForMissingKnitIds(missing!.reason)).toBe(true);
+    for (const problem of [
+      checkStructure(structure([...knitColumns, KNIT_ID_HEADER]), config),
+      checkStructure(structure(knitColumns, [KNIT_ID_HEADER]), config),
+    ])
+      expect(pausedForMissingKnitIds(problem!.reason)).toBe(false);
+    expect(pausedForMissingKnitIds("Left the Knit folder")).toBe(false);
+    expect(pausedForMissingKnitIds(null)).toBe(false);
   });
 
   it("pauses when a column Knit writes holds formulas, detected in the sheet (N6)", () => {

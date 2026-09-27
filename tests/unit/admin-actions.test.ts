@@ -10,7 +10,12 @@ import {
   type DraftConfig,
 } from "@/lib/domain/wizard";
 import { MemorySheetSource } from "@/lib/sheets/memory";
-import type { TabRef, TabStructure } from "@/lib/sheets/types";
+import {
+  columnLetter,
+  SheetError,
+  type TabRef,
+  type TabStructure,
+} from "@/lib/sheets/types";
 import { loadXlsxFolder } from "@/lib/sheets/xlsx";
 
 // PRD 11, 12.8, 9.3 (audit findings 10, 34, 35, 36, 37, 38, 44, 58, 59, 60, 61, C6): the admin's
@@ -48,8 +53,20 @@ const fx = vi.hoisted(() => ({
   today: "2026-09-30",
   leaseSkipped: false,
   structure: null as unknown,
+  /** Structures read one after another, before `structure` (an Error is thrown). */
+  structures: [] as unknown[],
   sheetTrackers: [] as unknown[],
+  /** What reached the sheet and the folder, in order. */
+  sheet: [] as string[],
+  user: null as unknown,
 }));
+
+const ADMIN = {
+  id: "00000000-0000-4000-8000-000000000001",
+  name: "Admin",
+  email: "admin@knit.test",
+  isAdmin: true,
+};
 
 function builder(table: string) {
   const call: Call = { table, op: "select", filters: [] };
@@ -138,12 +155,7 @@ vi.mock("next/server", () => ({
   after: (task: () => Promise<void>) => fx.after.push(task),
 }));
 vi.mock("@/lib/supabase/server", () => ({
-  getCurrentUser: async () => ({
-    id: "00000000-0000-4000-8000-000000000001",
-    name: "Admin",
-    email: "admin@knit.test",
-    isAdmin: true,
-  }),
+  getCurrentUser: async () => fx.user,
   getSupabase: async () => client("user"),
 }));
 vi.mock("@/lib/supabase/service", () => ({
@@ -160,8 +172,17 @@ vi.mock("@/lib/admin/data", () => ({
       pullRequests: async () => ({}),
     },
     source: {
-      readStructure: async () => fx.structure,
-      ensureKnitColumns: async () => ({}),
+      readStructure: async () => {
+        fx.sheet.push("readStructure");
+        const next =
+          fx.structures.length > 0 ? fx.structures.shift() : fx.structure;
+        if (next instanceof Error) throw next;
+        return next;
+      },
+      ensureKnitColumns: async () => {
+        fx.sheet.push("ensureKnitColumns");
+        return {};
+      },
     },
   }),
 }));
@@ -175,13 +196,23 @@ vi.mock("@/lib/jobs/cron", () => ({
       ? { skipped: true }
       : { skipped: false, result: await work({ deadline: 0 }) },
 }));
-vi.mock("@/lib/sync/discover", () => ({ discover: vi.fn(async () => ({})) }));
+vi.mock("@/lib/sync/discover", () => ({
+  discover: vi.fn(async () => {
+    fx.sheet.push("discover");
+    return {};
+  }),
+}));
 vi.mock("@/lib/sync/pull", () => ({
   pullAll: vi.fn(async () => [{ tracker: "t", outcome: "pulled" }]),
   pullTracker: vi.fn(async () => ({ outcome: "pulled" })),
 }));
 vi.mock("@/lib/sync/push", () => ({ pushDue: vi.fn(async () => ({})) }));
-vi.mock("@/lib/sync/recreate-ids", () => ({ recreateKnitIds: vi.fn() }));
+vi.mock("@/lib/sync/recreate-ids", () => ({
+  recreateKnitIds: vi.fn(async () => {
+    fx.sheet.push("recreateKnitIds");
+    return { written: 3, cleared: 0 };
+  }),
+}));
 
 const actions = await import("@/lib/actions/admin");
 
@@ -290,6 +321,9 @@ beforeEach(() => {
   fx.leaseSkipped = false;
   fx.tracker = trackerWith("active");
   fx.sheetTrackers = [];
+  fx.structures = [];
+  fx.sheet = [];
+  fx.user = ADMIN;
 });
 
 // ---------------------------------------------------------------------------------------
@@ -494,6 +528,191 @@ describe("resume (finding 38)", () => {
       }),
     );
     expect(fx.after).toHaveLength(2);
+  });
+
+  it("says the sheet or tab cannot be found, not to wait a minute (review R13)", async () => {
+    fx.structure = new SheetError("No tab 7 in the sheet", "tab_not_found");
+    expect(await actions.resumeTracker(TRACKER_ID)).toEqual({
+      error:
+        "Knit cannot resume yet: the sheet or tab cannot be found. Restore the sheet or its tab, then Resume.",
+    });
+    expect(rpcNames()).not.toContain("set_tracker_state");
+  });
+
+  it("still asks to try again in a minute when Google fails for a moment", async () => {
+    fx.structure = new SheetError("Google answered 503", "api_error", 503);
+    expect(await actions.resumeTracker(TRACKER_ID)).toEqual({
+      error: "Knit could not check the sheet. Try again in a minute.",
+    });
+  });
+});
+
+/** The Meta Ads tab as the structure check sees it, with Knit's columns and some changes. */
+function tabWith(
+  options: { knitId?: boolean; formulas?: string[]; doubled?: string[] } = {},
+): TabStructure {
+  const base = structure.headers.filter(
+    (h) => h.normalised !== "knit id" && h.normalised !== "knit note",
+  );
+  const knit = [
+    ...(options.knitId === false ? [] : ["Knit ID"]),
+    "Knit Note",
+  ].map((header, i) => ({
+    index: base.length + i,
+    letter: columnLetter(base.length + i),
+    header,
+    normalised: header.toLowerCase(),
+  }));
+  return {
+    ...structure,
+    headers: [...base, ...knit],
+    formulaColumns: [...structure.formulaColumns, ...(options.formulas ?? [])],
+    duplicateHeaders: [
+      ...structure.duplicateHeaders,
+      ...(options.doubled ?? []),
+    ],
+  };
+}
+
+describe("recreate the Knit ID column (14, N43, reviews R6 and R16)", () => {
+  const paused = {
+    id: TRACKER_ID,
+    fileId: FILE,
+    sheetGid: ref.sheetId,
+    config: META,
+  };
+  const resumed = () =>
+    fx.rpcs.some(
+      (r) =>
+        r.fn === "set_tracker_state" &&
+        (r.args as { p_state: string }).p_state === "active",
+    );
+
+  beforeEach(() => {
+    fx.sheetTrackers = [paused];
+    fx.results["drive_files.select"] = { data: { state: "connected" } };
+    fx.structure = tabWith();
+  });
+
+  it("recreates and resumes a tab whose only problem is the missing Knit ID column", async () => {
+    fx.structures = [tabWith({ knitId: false })];
+    expect(await actions.recreateKnitIdColumn(TRACKER_ID)).toEqual({
+      error: null,
+      notice: "Recreated 3 Knit IDs.",
+    });
+    expect(fx.sheet).toEqual([
+      "discover",
+      "readStructure",
+      "ensureKnitColumns",
+      "readStructure",
+      "recreateKnitIds",
+    ]);
+    expect(resumed()).toBe(true);
+  });
+
+  it("writes nothing to a sheet outside the Knit folder (D14)", async () => {
+    fx.results["drive_files.select"] = { data: { state: "left_folder" } };
+    fx.structures = [tabWith({ knitId: false })];
+    expect(await actions.recreateKnitIdColumn(TRACKER_ID)).toEqual({
+      error: "The sheet is not in the Knit folder. Move it back, then Resume.",
+    });
+    expect(fx.sheet).toEqual(["discover"]);
+    expect(resumed()).toBe(false);
+  });
+
+  it("says the sheet is outside the folder when the database refuses to resume it", async () => {
+    fx.structures = [tabWith({ knitId: false })];
+    fx.results["rpc.set_tracker_state"] = {
+      error: { message: "file_outside_folder" },
+    };
+    expect(await actions.recreateKnitIdColumn(TRACKER_ID)).toEqual({
+      error: "The sheet is not in the Knit folder. Move it back, then Resume.",
+    });
+  });
+
+  it.each([
+    [
+      "holds formulas",
+      tabWith({ formulas: ["knit id"] }),
+      "column 'Knit ID' holds formulas and cannot be written",
+    ],
+    [
+      "appears twice",
+      tabWith({ doubled: ["knit id"] }),
+      "column 'Knit ID' appears more than once",
+    ],
+  ])(
+    "never writes to a Knit ID column that %s (invariant 2, N39)",
+    async (_case, tab, reason) => {
+      fx.structure = tab;
+      expect(await actions.recreateKnitIdColumn(TRACKER_ID)).toEqual({
+        error: `Knit cannot recreate the Knit ID column yet: ${reason}. Fix the sheet or Edit mapping, then try again.`,
+      });
+      expect(fx.sheet).toEqual(["discover", "readStructure"]);
+      expect(resumed()).toBe(false);
+    },
+  );
+
+  it("checks the tab again once the columns are added, and resumes only when it passes", async () => {
+    fx.structures = [
+      tabWith({ knitId: false }),
+      tabWith({ formulas: ["knit id"] }),
+    ];
+    const result = await actions.recreateKnitIdColumn(TRACKER_ID);
+    expect(result.error).toMatch(/holds formulas/);
+    expect(fx.sheet).not.toContain("recreateKnitIds");
+    expect(resumed()).toBe(false);
+  });
+
+  it("says the sheet or tab cannot be found", async () => {
+    fx.structure = new SheetError("No tab 7 in the sheet", "tab_not_found");
+    expect(await actions.recreateKnitIdColumn(TRACKER_ID)).toEqual({
+      error:
+        "Knit cannot recreate the Knit ID column yet: the sheet or tab cannot be found. Restore the sheet or its tab, then try again.",
+    });
+  });
+});
+
+describe("pause and archive (review R12)", () => {
+  it("say in plain language when the database refuses the change", async () => {
+    fx.results["rpc.set_tracker_state"] = {
+      error: { message: "invalid_transition" },
+    };
+    expect(await actions.pauseTracker(TRACKER_ID)).toEqual({
+      error: "The tracker could not be paused. Reload the page and try again.",
+    });
+    expect(await actions.archiveTracker(TRACKER_ID)).toEqual({
+      error:
+        "The tracker could not be archived. Reload the page and try again.",
+    });
+  });
+});
+
+describe("a caller who is not the signed-in admin (review R14)", () => {
+  const SIGNED_OUT = { error: "Your session has ended. Sign in again." };
+  const NOT_ADMIN = { error: "Only the admin can do this." };
+  const USER = "00000000-0000-4000-8000-000000000002";
+
+  it("is told to sign in again when the session has ended", async () => {
+    fx.user = null;
+    expect(await actions.resumeTracker(TRACKER_ID)).toEqual(SIGNED_OUT);
+    expect(await actions.recreateKnitIdColumn(TRACKER_ID)).toEqual(SIGNED_OUT);
+    expect(await actions.startSetup(FILE, ref.sheetId)).toEqual(SIGNED_OUT);
+    expect(await actions.setUserActive(USER, false)).toEqual(SIGNED_OUT);
+    expect(
+      await actions.saveColumns(TRACKER_ID, { error: null }, columnsForm()),
+    ).toEqual(SIGNED_OUT);
+    expect(fx.calls).toEqual([]);
+    expect(fx.rpcs).toEqual([]);
+    expect(fx.sheet).toEqual([]);
+  });
+
+  it("is told only the admin can do this when signed in as a member", async () => {
+    fx.user = { ...ADMIN, id: USER, isAdmin: false };
+    expect(await actions.resumeTracker(TRACKER_ID)).toEqual(NOT_ADMIN);
+    expect(await actions.startSetup(FILE, ref.sheetId)).toEqual(NOT_ADMIN);
+    expect(await actions.setUserActive(USER, false)).toEqual(NOT_ADMIN);
+    expect(fx.calls).toEqual([]);
   });
 });
 

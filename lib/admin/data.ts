@@ -70,13 +70,6 @@ export type AdminTrackers = z.infer<typeof AdminTrackers>;
 
 export const loadAdminTrackers = () => callRpc(AdminTrackers, "admin_trackers");
 
-/**
- * 10.2 step 2, 14: the tracker is paused because its Knit ID column is gone, so it is not
- * resumed but recreated, after the admin checks the preview on the tracker's page.
- */
-export const pausedForMissingKnitIds = (pauseReason: string | null) =>
-  (pauseReason ?? "").toLowerCase().includes("knit id");
-
 const TrackerRow = z.object({
   id: z.uuid(),
   file_id: z.string(),

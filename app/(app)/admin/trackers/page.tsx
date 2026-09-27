@@ -11,7 +11,8 @@ import {
   setFileIgnored,
   syncTracker,
 } from "@/lib/actions/admin";
-import { loadAdminTrackers, pausedForMissingKnitIds } from "@/lib/admin/data";
+import { loadAdminTrackers } from "@/lib/admin/data";
+import { pausedForMissingKnitIds } from "@/lib/admin/pause";
 import { formatInstant } from "@/lib/time";
 
 export const metadata: Metadata = { title: "Trackers · Knit" };

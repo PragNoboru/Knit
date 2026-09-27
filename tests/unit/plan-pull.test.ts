@@ -385,3 +385,230 @@ describe("planPull: new rows (PRD 6.3, 6.4, 6.11, N9)", () => {
     ]);
   });
 });
+
+/** The row normalised on another day, or under another registry. */
+const normaliseWith = (
+  r: SheetRow,
+  over: { today?: string; config?: TrackerConfig } = {},
+) =>
+  normaliseRow(r, {
+    config: over.config ?? config,
+    calendar,
+    aliases,
+    trackerOwnerId: null,
+    today: over.today ?? TODAY,
+    knitIdHeader: "Knit ID",
+  });
+
+/** The task as apply_pull_plan leaves it after a plan's task update. */
+function afterPlan(task: PlanTask, p: ReturnType<typeof planPull>): PlanTask {
+  const update = p.taskUpdates.find((u) => u.id === task.id);
+  const { removedAtSource, ...set } = update?.set ?? {};
+  return {
+    ...task,
+    ...set,
+    removedAtSource: removedAtSource === null ? false : task.removedAtSource,
+  } as PlanTask;
+}
+
+describe("planPull: a status word mapped after it was read (PRD 6.8, N19 d, 10.3)", () => {
+  const mapped = TrackerConfig.parse({
+    ...config,
+    statusMap: { ...config.statusMap, "copy ready": "done" },
+  });
+  const copyReady = row("a", { status: "Copy ready" });
+
+  /** Pull 1: the unmapped word arrives, the task is stored as Yet to Start (6.8). */
+  function storedUnmapped(over: Partial<PlanTask> = {}): PlanTask {
+    const first = plan([dbTask("a")], [copyReady]);
+    expect(first.attention).toEqual([
+      expect.objectContaining({ dedupeKey: "unmapped_status:copy ready" }),
+    ]);
+    return { ...afterPlan(dbTask("a"), first), ...over };
+  }
+
+  it("Map status then pull again: the new mapping reaches the task and its open task-day", () => {
+    const task = storedUnmapped();
+    const p = planPull([task], [normaliseWith(copyReady, { config: mapped })], {
+      ...ctx,
+      config: mapped,
+    });
+    expect(p.taskUpdates).toEqual([
+      expect.objectContaining({
+        id: "a",
+        sourceSynced: true,
+        set: expect.objectContaining({
+          status: "done",
+          completedOn: TODAY,
+          sourceSnapshot: {
+            statusKey: "copy ready",
+            status: "done",
+            completedOn: null,
+          },
+        }),
+      }),
+    ]);
+    expect(p.taskDayUpdates).toEqual([
+      {
+        id: "td-1",
+        set: { status: "done", reason: null, statusChangedOn: TODAY },
+      },
+    ]);
+    expect(p.events).toEqual([
+      expect.objectContaining({
+        field: "status",
+        oldValue: "yet_to_start",
+        newValue: "done",
+      }),
+    ]);
+
+    // Pulling again changes nothing (invariant 8).
+    const again = planPull(
+      [afterPlan(task, p)],
+      [normaliseWith(copyReady, { config: mapped })],
+      { ...ctx, config: mapped },
+    );
+    expect(again.taskUpdates).toEqual([]);
+    expect(again.events).toEqual([]);
+  });
+
+  it("a status changed in Knit meanwhile still wins, with a conflict (10.3)", () => {
+    const task = storedUnmapped({ status: "in_progress", hubChanged: true });
+    const p = planPull([task], [normaliseWith(copyReady, { config: mapped })], {
+      ...ctx,
+      config: mapped,
+    });
+    expect(p.taskUpdates.flatMap((u) => Object.keys(u.set))).not.toContain(
+      "status",
+    );
+    expect(p.attention).toEqual([
+      expect.objectContaining({
+        kind: "conflict",
+        detail: expect.objectContaining({
+          knit: "in_progress",
+          source: "done",
+        }),
+      }),
+    ]);
+  });
+
+  it("a snapshot without the mapped status (saved by the push) compares the word only", () => {
+    // N8: Knit set In progress, which the tracker cannot write; the push saved the word.
+    const task = dbTask("a", {
+      status: "in_progress",
+      sourceSnapshot: { statusKey: "not started", completedOn: null },
+    });
+    expect(plan([task], [row("a")]).taskUpdates).toEqual([]);
+  });
+});
+
+describe("planPull: planned dates moved in the source (PRD 6.6)", () => {
+  it("a date moved while yesterday's task-day waits for its close moves the spillover the close makes", () => {
+    const today = "2026-10-01";
+    const moved = normaliseWith(row("a", { date: "Mon 5 Oct" }), { today });
+    // The close's forced pull (10.5): Wed 30 Sep is not closed yet.
+    const task = dbTask("a");
+    const first = planPull([task], [moved], { ...ctx, today });
+    expect(first.taskDayUpdates).toEqual([]);
+
+    // close_day(30 Sep): locked Not Done, a spillover on Thu 1 Oct (6.4).
+    const closed: PlanTask = {
+      ...afterPlan(task, first),
+      taskDays: [
+        taskDay("td-1", "2026-09-30", { status: "not_done", locked: true }),
+        taskDay("td-2", today, { spillIndex: 1, origin: "spillover" }),
+      ],
+    };
+    const second = planPull([closed], [moved], { ...ctx, today });
+    expect(second.taskDayUpdates).toEqual([
+      { id: "td-2", set: { day: "2026-10-05" } },
+    ]);
+    expect(second.taskUpdates[0]!.set).toMatchObject({
+      dueDate: "2026-10-05",
+      plannedStart: "2026-10-05",
+    });
+    expect(second.events).toEqual([
+      expect.objectContaining({
+        field: "due_date",
+        oldValue: "2026-09-30",
+        newValue: "2026-10-05",
+      }),
+    ]);
+  });
+
+  it("a date moved into the past while the task-day is on today: it turns into a spillover", () => {
+    const p = plan([dbTask("a")], [row("a", { date: "Mon 28 Sep" })]);
+    expect(p.taskDayUpdates).toEqual([
+      { id: "td-1", set: { spillIndex: 1, origin: "spillover" } },
+    ]);
+    expect(p.attention).toEqual([
+      expect.objectContaining({
+        kind: "past_date_added",
+        detail: { dueDate: "2026-09-28" },
+      }),
+    ]);
+    expect(p.events).toEqual([
+      expect.objectContaining({
+        field: "due_date",
+        oldValue: "2026-09-30",
+        newValue: "2026-09-28",
+      }),
+    ]);
+  });
+});
+
+describe("planPull: a row restored after its removal was closed (PRD 6.6, invariant 7)", () => {
+  const cancelled = (day: string) =>
+    taskDay("td-1", day, {
+      status: "cancelled",
+      reason: "Removed at source",
+      locked: true,
+    });
+
+  it("due date passed: it comes back as a spillover on today", () => {
+    const task = dbTask("a", {
+      dueDate: "2026-09-29",
+      plannedStart: "2026-09-29",
+      removedAtSource: true,
+      taskDays: [cancelled("2026-09-29")],
+    });
+    const p = plan([task], [row("a", { date: "Tue 29 Sep" })]);
+    expect(p.taskUpdates[0]!.set).toMatchObject({ removedAtSource: null });
+    expect(p.taskDayInserts).toEqual([
+      {
+        taskId: "a",
+        day: TODAY,
+        status: "yet_to_start",
+        spillIndex: 1,
+        origin: "spillover",
+        reason: null,
+        statusChangedOn: null,
+      },
+    ]);
+    expect(p.attention).toEqual([
+      expect.objectContaining({ kind: "past_date_added" }),
+    ]);
+  });
+
+  it("due date ahead but its task-day already closed: nothing placed, the admin is told", () => {
+    const task = dbTask("a", {
+      dueDate: "2026-10-05",
+      plannedStart: "2026-10-05",
+      removedAtSource: true,
+      taskDays: [cancelled("2026-10-05")],
+    });
+    const p = plan([task], [row("a", { date: "Mon 5 Oct" })]);
+    expect(p.taskDayInserts).toEqual([]);
+    expect(p.taskDayUpdates).toEqual([]);
+    expect(p.attention).toEqual([
+      expect.objectContaining({
+        kind: "bad_date",
+        taskId: "a",
+        detail: expect.objectContaining({
+          reason: "restored_after_close",
+          day: "2026-10-05",
+        }),
+      }),
+    ]);
+  });
+});

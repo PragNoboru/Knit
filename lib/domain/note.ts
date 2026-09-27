@@ -75,8 +75,21 @@ export function renderKnitNote(
     if (task.dueDate && doneOn < task.dueDate) {
       return `Done early on ${formatDay(doneOn)} · planned ${formatDay(task.dueDate)}`;
     }
-    if (spills > 0) {
-      return `Done on ${formatDay(doneOn)} · after ${spills} ${spills === 1 ? "spill" : "spills"}`;
+    // The spills before it was done: those of the task-day it was done on. A correction to
+    // Done cancels every later task-day (6.10), and their spills never happened as misses.
+    const doneDay = taskDays
+      .filter((d) => d.status === "done")
+      .reduce<NoteTaskDay | null>(
+        (latest, d) => (latest === null || d.day > latest.day ? d : latest),
+        null,
+      );
+    const spilled = doneDay
+      ? doneDay.spillIndex
+      : taskDays
+          .filter((d) => d.status !== "cancelled")
+          .reduce((max, d) => Math.max(max, d.spillIndex), 0);
+    if (spilled > 0) {
+      return `Done on ${formatDay(doneOn)} · after ${spilled} ${spilled === 1 ? "spill" : "spills"}`;
     }
     return `Done on ${formatDay(doneOn)}`;
   }

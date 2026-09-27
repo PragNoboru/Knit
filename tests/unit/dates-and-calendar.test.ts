@@ -111,6 +111,32 @@ describe("parsePlannedDate (PRD 6.3.2): every case in date-parser.cases.json", (
       end: "2026-10-06",
     });
   });
+
+  // Step 6: both ends of one window take the same year, also when today is near the 183-day
+  // edge of step 5 for one end and not the other.
+  it.each([
+    ["1-6 Oct", "2027-04-03", "2026-10-01", "2026-10-06"],
+    ["1-6 Oct", "2027-04-01", "2026-10-01", "2026-10-06"],
+    ["28 Sep - 2 Oct", "2027-03-31", "2026-09-28", "2026-10-02"],
+    ["30 Dec - 2 Jan", "2026-07-01", "2025-12-30", "2026-01-02"],
+    ["30 Dec - 2 Jan", "2026-12-15", "2026-12-30", "2027-01-02"],
+    ["28 Dec - 2 Jan 2027", "2026-06-20", "2026-12-28", "2027-01-02"],
+    ["Mon 28 Sep - 2 Oct", "2027-04-03", "2026-09-28", "2026-10-02"],
+  ])("reads %j on %s as one window", (text, today, start, end) => {
+    expect(parsePlannedDate({ value: text, formatted: text }, today)).toEqual({
+      kind: "window",
+      start,
+      end,
+    });
+  });
+
+  it("still refuses a window whose end comes before its start", () => {
+    for (const text of ["6-1 Oct", "2 Oct - 28 Sep"]) {
+      expect(
+        parsePlannedDate({ value: text, formatted: text }, referenceToday),
+      ).toEqual({ kind: "invalid", reason: "range_end_before_start" });
+    }
+  });
 });
 
 describe("working-day calendar (PRD 6.2)", () => {

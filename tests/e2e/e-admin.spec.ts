@@ -106,7 +106,9 @@ test("the wizard connects a new sheet end to end", async ({ page }, info) => {
 
   // Step 7: name, colour, go-live.
   await expect(page).toHaveURL(/\/setup\/details$/);
-  await page.getByLabel("Name").fill("Noboru · CA Campaign");
+  await page
+    .getByRole("textbox", { name: "Name", exact: true })
+    .fill("Noboru · CA Campaign");
   await page.getByRole("button", { name: "Save and continue" }).click();
 
   // Step 8: preview. Nothing is written yet.
@@ -166,7 +168,7 @@ test("the other admin screens", async ({ page }, info) => {
 
   await page.goto("/admin/people");
   await page.getByLabel("Name", { exact: true }).fill("Asha");
-  await page.getByLabel("Email").fill("asha@knit.test");
+  await page.getByLabel("Email", { exact: true }).fill("asha@knit.test");
   await page
     .getByLabel("Password", { exact: true })
     .fill("a-long-test-password");
@@ -182,8 +184,12 @@ test("the other admin screens", async ({ page }, info) => {
 
   await page.goto("/admin/holidays");
   await expect(page.getByRole("cell", { name: "Dussehra" })).toBeVisible();
-  await page.getByLabel("Date").fill("2026-12-24");
-  await page.getByLabel("Name").fill("Office closed");
+  await page
+    .getByRole("textbox", { name: "Date", exact: true })
+    .fill("2026-12-24");
+  await page
+    .getByRole("textbox", { name: "Name", exact: true })
+    .fill("Office closed");
   await page.getByRole("button", { name: "Save holiday" }).click();
   await expect(page.getByText("Saved Office closed.")).toBeVisible();
   await expect(page.getByRole("cell", { name: "Office closed" })).toBeVisible();

@@ -147,6 +147,17 @@ test("the wizard connects a new sheet end to end", async ({ page }, info) => {
       .getByRole("region", { name: "New sheet found" })
       .getByText("Noboru_CA_Campaign_test_example"),
   ).toHaveCount(0);
+
+  // Glossary, 11 step 2: the spreadsheet's other tabs can still be set up; this one says it
+  // is connected.
+  await row.getByRole("link", { name: "Set up another tab" }).click();
+  await expect(page).toHaveURL(/\/admin\/trackers\/new\//);
+  await expect(
+    page
+      .getByRole("listitem")
+      .filter({ hasText: "Tasks" })
+      .getByRole("link", { name: "Connected as Noboru · CA Campaign" }),
+  ).toBeVisible();
 });
 
 test("the other admin screens", async ({ page }, info) => {

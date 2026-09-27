@@ -3,12 +3,16 @@ import Link from "next/link";
 import { ActionForm } from "@/components/admin/action-form";
 import { Section } from "@/components/admin/fields";
 import { activateTracker } from "@/lib/actions/admin";
-import type { AdminTracker } from "@/lib/admin/data";
+import { unmappedStatusWords, type AdminTracker } from "@/lib/admin/data";
 import { draftProblems, WIZARD_STEPS } from "@/lib/domain/wizard";
 
 // PRD 11 step 9: Knit adds its two columns, writes an ID on every row and runs the first pull.
-export function ActivateStep({ tracker }: { tracker: AdminTracker }) {
-  const problems = draftProblems(tracker.draft);
+// Step 5: activation stays blocked while a word of the status column, as the tab holds it now,
+// has no Knit status.
+export async function ActivateStep({ tracker }: { tracker: AdminTracker }) {
+  const problems = draftProblems(tracker.draft, {
+    unmappedWords: await unmappedStatusWords(tracker),
+  });
   const titleOf = (step: string) =>
     WIZARD_STEPS.find((s) => s.step === step)?.title ?? step;
   return (

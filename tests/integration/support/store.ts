@@ -28,6 +28,17 @@ const SIGNATURES: Record<
     },
   },
   record_drive_listing: { args: { p_files: "jsonb" } },
+  pull_requests: { args: { p_ids: "uuid[]" } },
+  mark_pull_served: { args: { p_tracker_id: "uuid", p_requested: "bigint" } },
+  record_sync_run: {
+    args: {
+      p_job: "text",
+      p_started_at: "timestamptz",
+      p_ok: "boolean",
+      p_stats: "jsonb",
+      p_error: "text",
+    },
+  },
   pause_tracker: {
     args: {
       p_tracker_id: "uuid",

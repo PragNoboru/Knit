@@ -11,10 +11,14 @@ import {
   setFileIgnored,
   syncTracker,
 } from "@/lib/actions/admin";
-import { loadAdminTrackers } from "@/lib/admin/data";
+import { loadAdminTrackers, pausedForMissingKnitIds } from "@/lib/admin/data";
 import { formatInstant } from "@/lib/time";
 
 export const metadata: Metadata = { title: "Trackers · Knit" };
+
+// PRD 7.4, 14: how a file that is not a Google Sheet is shown.
+const NOT_A_SHEET =
+  "Not a Google Sheet: open it and use File > Save as Google Sheets";
 
 const STATE_LABELS = {
   draft: "Being set up",
@@ -32,6 +36,17 @@ export default async function TrackersPage() {
   );
   const ignored = files.filter((f) => f.state === "ignored");
   const notSheets = files.filter((f) => f.state === "not_a_sheet");
+  // Glossary, 11 step 2: a spreadsheet with two task tabs is two trackers, so each sheet
+  // that already has one offers its other tabs (once per sheet, on its first row).
+  const firstRowOfFile = new Set(
+    trackers
+      .filter((t) => t.state !== "archived")
+      .filter(
+        (t, index, all) =>
+          all.findIndex((o) => o.fileId === t.fileId) === index,
+      )
+      .map((t) => t.id),
+  );
 
   return (
     <div className="flex flex-col gap-5">
@@ -108,6 +123,14 @@ export default async function TrackersPage() {
                   <p className="mt-1 text-xs text-muted-foreground">
                     {t.fileName} · {t.tabName}
                   </p>
+                  {firstRowOfFile.has(t.id) ? (
+                    <Link
+                      href={`/admin/trackers/new/${encodeURIComponent(t.fileId)}`}
+                      className="mt-1 inline-block text-xs underline"
+                    >
+                      Set up another tab
+                    </Link>
+                  ) : null}
                 </td>
                 <td>
                   {STATE_LABELS[t.state]}
@@ -140,7 +163,20 @@ export default async function TrackersPage() {
                         </ActionButton>
                       </>
                     ) : null}
-                    {t.state === "paused" ? (
+                    {t.state === "paused" &&
+                    pausedForMissingKnitIds(t.pauseReason) ? (
+                      // 14: the Knit ID column is recreated only after the admin checks the
+                      // preview on the tracker's page.
+                      <Link
+                        href={`/admin/trackers/${t.id}`}
+                        className={buttonVariants({
+                          size: "sm",
+                          variant: "outline",
+                        })}
+                      >
+                        Recreate Knit IDs
+                      </Link>
+                    ) : t.state === "paused" ? (
                       <ActionButton action={resumeTracker.bind(null, t.id)}>
                         Resume
                       </ActionButton>
@@ -191,7 +227,9 @@ export default async function TrackersPage() {
         >
           <ul className="list-disc pl-5 text-sm">
             {notSheets.map((file) => (
-              <li key={file.fileId}>{file.name}</li>
+              <li key={file.fileId}>
+                {file.name}: {NOT_A_SHEET}
+              </li>
             ))}
           </ul>
         </Section>

@@ -1,6 +1,14 @@
 import { z } from "zod";
 
-import type { LocalDate } from "@/lib/time";
+import { KNIT_ID_HEADER, KNIT_NOTE_HEADER } from "@/lib/sheets/types";
+import {
+  addDays,
+  formatDate,
+  makeDate,
+  monthOf,
+  yearOf,
+  type LocalDate,
+} from "@/lib/time";
 
 import { TRACKER_COLORS, type TrackerColor } from "./cards";
 import {
@@ -10,8 +18,14 @@ import {
   USER_STATUSES,
   type UserStatus,
 } from "./config";
-import { parsePlannedDate, type CellValue } from "./dates";
+import {
+  normaliseDateText,
+  parseDateText,
+  parsePlannedDate,
+  type CellValue,
+} from "./dates";
 import { cellOf, textOf, type NormalisedRow, type SheetRow } from "./rows";
+import { templateHeaders } from "./templates";
 
 /**
  * PRD 11: the tracker setup wizard's rules. The wizard keeps a draft config (a tracker in
@@ -35,6 +49,8 @@ export const DraftConfig = z.object({
   cancelReasons: z.record(z.string(), z.string()).optional(),
   writeBack: TrackerConfig.shape.writeBack.partial().optional(),
   completedOnFormat: TrackerConfig.shape.completedOnFormat.optional(),
+  /** 11 step 7: the admin saved a go-live date; until then it defaults to today. */
+  goLiveChosen: z.boolean().optional(),
 });
 export type DraftConfig = z.infer<typeof DraftConfig>;
 
@@ -190,8 +206,118 @@ export function unmappedChoices(
   return choices.filter((choice) => statusMap?.[choice.key] === undefined);
 }
 
+/**
+ * 11 step 5, 6.8: the words Knit may write back. writeBack is "the exact word written to the
+ * statusWrite column", so they come from that column: its dropdown's options, else the words
+ * found in it. None when no write column is mapped (N8: the sheet's statuses are left alone).
+ */
+export function writeBackOptions(
+  rows: readonly SheetRow[],
+  statusWrite: string | null | undefined,
+  dropdown: readonly string[] | null,
+): string[] {
+  return statusWrite
+    ? writeBackWords(statusChoices(rows, statusWrite, dropdown))
+    : [];
+}
+
+/** 11 step 5: a write-back value the form sent, checked against what the step offered. */
+export function writeBackValue(
+  posted: string,
+  words: readonly string[],
+  canWrite: boolean,
+): { ok: true; value: string | null } | { ok: false } {
+  if (posted === LEAVE_UNCHANGED) return { ok: true, value: null };
+  if (!canWrite) return { ok: false };
+  if (posted === CLEAR_CELL) return { ok: true, value: "" };
+  return words.includes(posted) ? { ok: true, value: posted } : { ok: false };
+}
+
+type ColumnChoices = NonNullable<DraftConfig["columns"]>;
+
+/**
+ * Invariant 5, 6.8, 11 step 4: Knit writes only the status cell and the completed-on cell (and
+ * its own two columns), so neither write target may be a column that holds the task's content:
+ * the planned date, the title (or a header in the title template), the owner, the source ID or
+ * the critical flag. The two targets are different columns, and the completed-on date never goes
+ * into the column Knit reads the status from. Status (write) may be Status (read). A plain
+ * sentence for the first problem, or null.
+ */
+export function writeTargetProblem(
+  columns: ColumnChoices,
+  titleTemplate: string | null | undefined,
+): string | null {
+  const roles: [string | null | undefined, string][] = [
+    [columns.date, "the planned date"],
+    [columns.title, "the title"],
+    ...(titleTemplate ? templateHeaders(titleTemplate) : []).map(
+      (header): [string, string] => [header, "part of the title"],
+    ),
+    [columns.owner, "the owner"],
+    [columns.sourceRef, "the source ID"],
+    [columns.critical?.header, "the critical flag"],
+    [KNIT_ID_HEADER, "Knit's own ID column"],
+    [KNIT_NOTE_HEADER, "Knit's own note column"],
+  ];
+  const same = (a: string | null | undefined, b: string | null | undefined) =>
+    Boolean(a) && Boolean(b) && normaliseKey(a!) === normaliseKey(b!);
+  for (const target of [columns.statusWrite, columns.completedOn]) {
+    if (!target) continue;
+    const role = roles.find(([header]) => same(header, target));
+    if (role)
+      return `"${target}" is ${role[1]}, which Knit never changes. Choose another column to write to.`;
+  }
+  if (same(columns.statusWrite, columns.completedOn))
+    return "Status (write) and Completed on must be different columns.";
+  if (same(columns.completedOn, columns.statusRead))
+    return "Completed on cannot be the column Knit reads the status from.";
+  return null;
+}
+
+// formatDate's tokens (lib/time), longest first, and text in single quotes.
+const PATTERN_PARTS = /'[^']*'|EEEE|EEE|dd|d|MMMM|MMM|MM|M|yyyy|yy/g;
+
+/**
+ * 6.8 completedOnFormat {type: "text", pattern}: Knit writes the completion date in this
+ * pattern and reads it back when it verifies the write and when it clears the cell on a revert
+ * (10.4). So every letter must be one of formatDate's tokens (EEEE, EEE, d, dd, MMMM, MMM, M,
+ * MM, yyyy, yy) or quoted text, the pattern needs a day and a month, and dates written in it
+ * must read back as the same date (checked on dates near today, day numbers above and below
+ * 12). "dd/mm/yyyy" would write "28/mm/2026". A plain sentence, or null.
+ */
+export function completedOnPatternProblem(
+  pattern: string,
+  today: LocalDate,
+): string | null {
+  const refuse = `Knit cannot write dates as "${pattern}" and read them back. Use its letters: d or dd for the day, MMM, MMMM, M or MM for the month, yyyy or yy for the year and EEE for the weekday, for example EEE d MMM or dd/MM/yyyy.`;
+  const tokens = pattern.match(PATTERN_PARTS) ?? [];
+  if (/\p{L}/u.test(pattern.replace(PATTERN_PARTS, ""))) return refuse;
+  if (!tokens.some((t) => t === "d" || t === "dd")) return refuse;
+  if (!tokens.some((t) => /^M+$/.test(t))) return refuse;
+  const samples = [0, 30].flatMap((offset) => {
+    const month = addDays(today, offset);
+    return [5, 20]
+      .map((day) => makeDate(yearOf(month), monthOf(month), day))
+      .filter((date): date is LocalDate => date !== null);
+  });
+  for (const date of [today, ...samples]) {
+    const read = parseDateText(
+      normaliseDateText(formatDate(date, pattern)),
+      today,
+    );
+    if (read.kind !== "single" || read.start !== date) return refuse;
+  }
+  return null;
+}
+
 /** What still blocks activation, step by step (11). Empty when the draft is complete. */
-export function draftProblems(draft: DraftConfig): {
+export function draftProblems(
+  draft: DraftConfig,
+  found: {
+    /** 11 step 5: words in the status column now (its rows and dropdown) with no Knit status. */
+    unmappedWords?: readonly string[];
+  } = {},
+): {
   step: WizardStep;
   problem: string;
 }[] {
@@ -205,8 +331,17 @@ export function draftProblems(draft: DraftConfig): {
     problems.push({ step: "columns", problem: "Choose the title column." });
   if (!columns.statusRead)
     problems.push({ step: "columns", problem: "Choose the status column." });
+  const conflict = writeTargetProblem(columns, draft.titleTemplate);
+  if (conflict) problems.push({ step: "columns", problem: conflict });
   if (draft.statusMap === undefined)
     problems.push({ step: "statuses", problem: "Map the statuses." });
+  else if (found.unmappedWords && found.unmappedWords.length > 0)
+    problems.push({
+      step: "statuses",
+      problem: `Choose a Knit status for every word. Not mapped yet: ${found.unmappedWords
+        .map((word) => (word === "" ? "(blank)" : word))
+        .join(", ")}.`,
+    });
   if (
     draft.writeBack === undefined ||
     USER_STATUSES.some((status) => draft.writeBack?.[status] === undefined)
@@ -294,6 +429,19 @@ export function previewStats(
 /** 11 step 6: owner names in the tab that are neither users nor known non-users. */
 export function unknownOwnerNames(rows: readonly NormalisedRow[]): string[] {
   return [...new Set(rows.flatMap((row) => row.unknownOwners))].sort();
+}
+
+/**
+ * 11 step 7: go-live defaults to today, the day the admin is at step 7 or activates, not the
+ * day setup started; a date the admin saved at step 7 stays. Once live it is fixed (N19 b).
+ */
+export function goLiveDefault(
+  tracker: { state: string; goLiveDate: LocalDate; draft: DraftConfig },
+  today: LocalDate,
+): LocalDate {
+  return tracker.state === "draft" && !tracker.draft.goLiveChosen
+    ? today
+    : tracker.goLiveDate;
 }
 
 /** 11 step 7: the first colour of the palette no other tracker uses. */

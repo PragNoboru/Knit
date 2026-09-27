@@ -5,9 +5,15 @@ import { z } from "zod";
 
 import { LocalDateSchema, TaskCard, TRACKER_COLORS } from "@/lib/domain/cards";
 import { calendarFromDays } from "@/lib/domain/calendar";
+import { normaliseKey } from "@/lib/domain/config";
 import { aliasMap } from "@/lib/domain/owners";
 import { isEmptyRow, normaliseRow } from "@/lib/domain/rows";
-import { DraftConfig, finalConfig } from "@/lib/domain/wizard";
+import {
+  DraftConfig,
+  finalConfig,
+  statusChoices,
+  unmappedChoices,
+} from "@/lib/domain/wizard";
 import { jobDeps } from "@/lib/jobs/cron";
 import { KNIT_ID_HEADER, type TabRef } from "@/lib/sheets/types";
 import { callRpc, getSupabase } from "@/lib/supabase/server";
@@ -63,6 +69,13 @@ export const AdminTrackers = z.object({
 export type AdminTrackers = z.infer<typeof AdminTrackers>;
 
 export const loadAdminTrackers = () => callRpc(AdminTrackers, "admin_trackers");
+
+/**
+ * 10.2 step 2, 14: the tracker is paused because its Knit ID column is gone, so it is not
+ * resumed but recreated, after the admin checks the preview on the tracker's page.
+ */
+export const pausedForMissingKnitIds = (pauseReason: string | null) =>
+  (pauseReason ?? "").toLowerCase().includes("knit id");
 
 const TrackerRow = z.object({
   id: z.uuid(),
@@ -160,6 +173,26 @@ export const loadTabData = cache(async (ref: TabRef, headerRow: number) => {
     rows,
   };
 });
+
+/**
+ * 11 step 5: the words of a status column as the tab holds them now (its dropdown and every
+ * word in use) that the draft's status map does not cover yet. Activation is blocked while
+ * any is left, so a column changed after step 5, or a word typed into the sheet since, is
+ * caught before the first pull.
+ */
+export async function unmappedStatusWords(
+  tracker: AdminTracker,
+): Promise<string[]> {
+  const { headerRow, columns, statusMap } = tracker.draft;
+  if (headerRow === undefined || !columns?.statusRead) return [];
+  const { structure, rows } = await loadTabData(tracker.ref, headerRow);
+  const choices = statusChoices(
+    rows,
+    columns.statusRead,
+    structure.validations[normaliseKey(columns.statusRead)]?.options ?? null,
+  );
+  return unmappedChoices(choices, statusMap).map((choice) => choice.word);
+}
 
 /** 11 steps 6 and 8: the rows as the pull would read them with the draft's config. */
 export async function loadNormalisedRows(tracker: AdminTracker) {

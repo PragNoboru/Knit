@@ -1,16 +1,38 @@
--- PRD 18.2: register the jobs. Run ONCE in the Supabase SQL editor after the first production
--- deploy (docs/RUNBOOK.md). Not a migration: it needs the real app URL and cron secret, which
--- must never be committed. Replace both placeholders before running.
+-- PRD 18.2: register the jobs. Run in the Supabase SQL editor after the first production deploy
+-- (docs/RUNBOOK.md 2.4). Not a migration: it needs the real app URL and cron secret, which must
+-- never be committed. Replace both placeholders before running.
+--
+-- Safe to run again: the secrets are created or updated, the function is replaced and each job
+-- is rescheduled by name. Running it again is also how the app URL or the cron secret changes,
+-- and it is needed after `supabase db reset --linked` (RUNBOOK 5), which keeps the Vault
+-- secrets but drops the function and the jobs.
 --
 -- pg_cron runs in UTC. Every call carries x-knit-cron-secret; the app rejects calls without it.
 
 create extension if not exists pg_cron;
 create extension if not exists pg_net with schema extensions;
 
-select vault.create_secret('https://<app>.vercel.app', 'knit_app_url');
-select vault.create_secret('<same value as KNIT_CRON_SECRET>', 'knit_cron_secret');
+do $$
+declare
+  v_secret record;
+begin
+  for v_secret in
+    select * from (values
+      ('knit_app_url', 'https://<app>.vercel.app'),
+      ('knit_cron_secret', '<same value as KNIT_CRON_SECRET>')
+    ) as s (name, value)
+  loop
+    if exists (select 1 from vault.secrets where name = v_secret.name) then
+      perform vault.update_secret(
+        (select id from vault.secrets where name = v_secret.name), v_secret.value);
+    else
+      perform vault.create_secret(v_secret.value, v_secret.name);
+    end if;
+  end loop;
+end;
+$$;
 
--- Posts to a job endpoint. The 60 s timeout matches the functions' maxDuration.
+-- Posts to a job endpoint. The 60 s timeout matches the functions' maxDuration (RUNBOOK 2.3).
 create or replace function public.knit_call_job(path text)
 returns void
 language sql

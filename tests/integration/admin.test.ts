@@ -148,6 +148,54 @@ describe("admin functions", () => {
     ).rejects.toThrow(/invalid_transition/);
   });
 
+  it("set_tracker_state does not resume a tracker whose sheet is still outside the Knit folder (10.1, D14)", async () => {
+    const { taskId } = await createPlannedTask(db(), {
+      trackerId,
+      assignees: [member],
+      day: TODAY,
+    });
+    await db().query(
+      "update drive_files set state = 'left_folder' where file_id = (select file_id from trackers where id = $1)",
+      [trackerId],
+    );
+    await service(
+      `select set_tracker_state('${trackerId}', 'paused', 'Left the Knit folder')`,
+    );
+    await db().query(
+      `insert into outbox (task_id, tracker_id, payload, state) values ($1, $2, '{}', 'held')`,
+      [taskId, trackerId],
+    );
+    await expect(
+      service(`select set_tracker_state('${trackerId}', 'active')`),
+    ).rejects.toThrow(/file_outside_folder/);
+    expect(
+      await db().query("select state::text from trackers where id = $1", [
+        trackerId,
+      ]),
+    ).toEqual([{ state: "paused" }]);
+    expect(await db().query("select state::text from outbox")).toEqual([
+      { state: "held" },
+    ]);
+    // Back in the folder (discover marks it connected): Resume works.
+    await db().query(
+      "update drive_files set state = 'connected' where file_id = (select file_id from trackers where id = $1)",
+      [trackerId],
+    );
+    await service(`select set_tracker_state('${trackerId}', 'active')`);
+    expect(await db().query("select state::text from outbox")).toEqual([
+      { state: "pending" },
+    ]);
+    // It can still be archived while the sheet is out.
+    await service(
+      `select set_tracker_state('${trackerId}', 'paused', 'Left the Knit folder')`,
+    );
+    await db().query(
+      "update drive_files set state = 'left_folder' where file_id = (select file_id from trackers where id = $1)",
+      [trackerId],
+    );
+    await service(`select set_tracker_state('${trackerId}', 'archived')`);
+  });
+
   it("admin_retry_writes sends the newest failed write-back again and closes its item", async () => {
     const { taskId } = await createPlannedTask(db(), {
       trackerId,

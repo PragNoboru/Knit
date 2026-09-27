@@ -86,7 +86,8 @@ export async function runJob(
 /**
  * Runs `work` under the job's lease and time budget. The cron endpoints use it through
  * runJob; a server action that has already checked the signed-in user uses it directly
- * (Sync now, PRD 7.3). `skipped` when another run holds the lease.
+ * (Sync now, PRD 7.3). `skipped` when another run holds the lease; that call is recorded as a
+ * "skipped" run (PRD 19), so an overlap shows in Sync health.
  */
 export async function withJobLease<T>(
   job: string,
@@ -96,14 +97,129 @@ export async function withJobLease<T>(
   ) => Promise<T>,
 ): Promise<{ skipped: true } | { skipped: false; result: T }> {
   const deps = await jobDeps();
+  const startedAt = new Date().toISOString();
   const deadline = deadlineFor(maxDurationSeconds);
   const holder = await acquire(deps.store, job, maxDurationSeconds);
-  if (!holder) return { skipped: true };
+  if (!holder) {
+    await recordLeaseSkipped(deps.store, job, startedAt);
+    return { skipped: true };
+  }
   try {
     return { skipped: false, result: await work({ ...deps, deadline }) };
   } finally {
     await deps.store.releaseLease(job, holder);
   }
+}
+
+type RunRecord = Parameters<SyncStore["recordRun"]>[0];
+
+/** Writes a sync_runs row; a failure to record is logged and never fails the job itself. */
+async function record(store: SyncStore, run: RunRecord): Promise<void> {
+  try {
+    await store.recordRun(run);
+  } catch (error) {
+    logEvent("sync_run.record_failed", {
+      job: run.job,
+      error: errorSummary(error),
+    });
+  }
+}
+
+/** PRD 19, 7.3: a call that found the job's lease held did nothing; Sync health says so. */
+export function recordLeaseSkipped(
+  store: SyncStore,
+  job: string,
+  startedAt: string,
+): Promise<void> {
+  return record(store, {
+    job,
+    startedAt,
+    ok: true,
+    stats: { outcome: "skipped", reason: "another call holds the lease" },
+  });
+}
+
+export interface RunSummary {
+  /** false for a call that found nothing to do: it writes no row (record_sync_run). */
+  record: boolean;
+  ok: boolean;
+  stats: Record<string, unknown>;
+  error?: string | null;
+}
+
+/**
+ * PRD 19: runs one push or close call and records it in sync_runs when it did work or failed.
+ * A call that throws is recorded as failed, with the error's code, and the error goes on.
+ */
+export async function recordedRun<T>(
+  store: SyncStore,
+  job: string,
+  work: () => Promise<T>,
+  summarise: (result: T) => RunSummary,
+): Promise<T> {
+  const startedAt = new Date().toISOString();
+  let result: T;
+  try {
+    result = await work();
+  } catch (error) {
+    await record(store, {
+      job,
+      startedAt,
+      ok: false,
+      stats: { outcome: "failed" },
+      error: errorSummary(error),
+    });
+    throw error;
+  }
+  const summary = summarise(result);
+  if (summary.record)
+    await record(store, {
+      job,
+      startedAt,
+      ok: summary.ok,
+      stats: summary.stats,
+      error: summary.error ?? null,
+    });
+  return result;
+}
+
+/** 10.4: a push call is worth a row when it claimed write-backs; retries and failures fail it. */
+export function pushRunSummary(stats: {
+  claimed: number;
+  done: number;
+  retried: number;
+  failed: number;
+}): RunSummary {
+  const problems = stats.retried + stats.failed;
+  return {
+    record: stats.claimed > 0,
+    ok: problems === 0,
+    stats: { ...stats },
+    error:
+      problems === 0
+        ? null
+        : `${stats.retried} write-backs wait for a retry, ${stats.failed} failed`,
+  };
+}
+
+/** 10.5: a close call is worth a row when it closed a day or failed on one. */
+export function closeRunSummary(result: {
+  closed: { day: string }[];
+  failed: { day: string; error: string } | null;
+}): RunSummary {
+  return {
+    record: result.closed.length > 0 || result.failed !== null,
+    ok: result.failed === null,
+    stats: {
+      // Numbers and text, as Sync health lists them.
+      closed: result.closed.length,
+      ...(result.closed.length > 0
+        ? { days: result.closed.map((c) => c.day).join(", ") }
+        : {}),
+      ...(result.failed ? { failedDay: result.failed.day } : {}),
+    },
+    error: result.failed?.error ?? null,
+  };
 }
 
 async function acquire(

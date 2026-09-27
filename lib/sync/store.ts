@@ -38,6 +38,15 @@ export interface SyncContext {
 export type ApplyResult =
   { result: "applied"; stats: PullPlan["stats"] } | { result: "retry" };
 
+/**
+ * PRD 11, N19(d), 12.8: the pulls a tracker is owed because its config, the aliases or the
+ * calendar changed (trackers.pull_requested), and how many a finished pull has served.
+ */
+export interface PullRequest {
+  requested: number;
+  served: number;
+}
+
 /** What close_day returns (PRD 6.4, 19). */
 export interface CloseDayStats {
   day: LocalDate;
@@ -61,6 +70,16 @@ export interface SyncStore {
     trackerId: string,
   ): Promise<{ stateVersion: number; tasks: PlanTask[] }>;
   knitIdsElsewhere(trackerId: string, ids: string[]): Promise<string[]>;
+  pullRequests(ids?: string[]): Promise<Record<string, PullRequest>>;
+  markPullServed(trackerId: string, requested: number): Promise<void>;
+  /** PRD 19: one finished sync_runs row for a job call that did work (see record_sync_run). */
+  recordRun(run: {
+    job: string;
+    startedAt: string;
+    ok: boolean;
+    stats: Record<string, unknown>;
+    error?: string | null;
+  }): Promise<void>;
   applyPullPlan(
     trackerId: string,
     expectedStateVersion: number,
@@ -162,6 +181,35 @@ export function createSyncStore(rpc: Rpc): SyncStore {
             p_tracker_id: trackerId,
             p_ids: ids,
           })) as string[]),
+    pullRequests: async (ids) => {
+      const raw = (await rpc("pull_requests", {
+        p_ids: ids ?? null,
+      })) as Record<
+        string,
+        { requested: number | string; served: number | string }
+      > | null;
+      return Object.fromEntries(
+        Object.entries(raw ?? {}).map(([id, r]) => [
+          id,
+          { requested: Number(r.requested), served: Number(r.served) },
+        ]),
+      );
+    },
+    markPullServed: async (trackerId, requested) => {
+      await rpc("mark_pull_served", {
+        p_tracker_id: trackerId,
+        p_requested: requested,
+      });
+    },
+    recordRun: async ({ job, startedAt, ok, stats, error }) => {
+      await rpc("record_sync_run", {
+        p_job: job,
+        p_started_at: startedAt,
+        p_ok: ok,
+        p_stats: stats,
+        p_error: error ?? null,
+      });
+    },
     applyPullPlan: async (
       trackerId,
       expectedStateVersion,

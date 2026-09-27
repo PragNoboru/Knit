@@ -9,6 +9,7 @@ import {
   loadSheetDeps,
   loadTabData,
   loadTracker,
+  unmappedStatusWords,
   type AdminTracker,
 } from "@/lib/admin/data";
 import { TRACKER_COLORS } from "@/lib/domain/cards";
@@ -21,20 +22,24 @@ import {
 } from "@/lib/domain/config";
 import { REASON_MAX_LENGTH } from "@/lib/domain/status";
 import {
-  CLEAR_CELL,
+  completedOnPatternProblem,
   DraftConfig,
   draftProblems,
   finalConfig,
-  LEAVE_UNCHANGED,
+  goLiveDefault,
   nextColour,
   statusChoices,
   statusField,
   unmappedChoices,
   writeBackField,
+  writeBackOptions,
+  writeBackValue,
+  writeTargetProblem,
   type WizardStep,
 } from "@/lib/domain/wizard";
 import { messageFor } from "@/lib/errors";
 import { withJobLease } from "@/lib/jobs/cron";
+import type { TabStructure } from "@/lib/sheets/types";
 import { getCurrentUser, getSupabase } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { discover } from "@/lib/sync/discover";
@@ -42,27 +47,56 @@ import { errorSummary, logEvent } from "@/lib/sync/log";
 import { pullAll, pullTracker } from "@/lib/sync/pull";
 import { pushDue } from "@/lib/sync/push";
 import { recreateKnitIds } from "@/lib/sync/recreate-ids";
+import { checkStructure, type StructureProblem } from "@/lib/sync/structure";
 import { isLocalDate } from "@/lib/time";
 
-// PRD 11, 12.8, 13: the admin's actions. Each checks the caller is the active admin first;
-// rules (tracker states, backlog, attention, retries) live in the database functions they
-// call, and tracker configs are validated with zod before they are saved (8.2).
+// PRD 11, 12.8, 13: the admin's actions. Each checks the caller is the active admin first,
+// then validates every input with zod (9.3), the arguments bound in the page as well as the
+// form fields; rules (tracker states, backlog, attention, retries) live in the database
+// functions they call, and tracker configs are validated with zod before they are saved (8.2).
 
 export interface FormState {
   error: string | null;
   notice?: string | null;
+  /** 12.8, N19(g): the number of open tasks the admin is asked to confirm. */
+  confirm?: number;
 }
 
 const NOT_ADMIN: FormState = { error: "Only the admin can do this." };
+const INVALID: FormState = {
+  error: "This is no longer valid. Reload the page and try again.",
+};
 const isAdmin = async () => (await getCurrentUser())?.isAdmin === true;
 
-/** A forced pull of some or all active trackers after the response (7.3), under the lease. */
+// 9.3: the arguments pages bind to these actions arrive as the browser sends them.
+const TrackerId = z.uuid();
+const UserId = z.uuid();
+const ItemId = z.number().int().positive();
+const FileId = z.string().trim().min(1).max(200);
+const SheetId = z.number().int().nonnegative();
+const OwnerName = z.string().trim().min(1).max(200);
+const StatusWord = z.string().max(200);
+
+/**
+ * A forced pull of some or all active trackers after the response (7.3), under the lease.
+ * When another pull holds the lease this one is not run, but nothing is lost: a change to a
+ * tracker's config, the people aliases or the calendar is recorded in the database as a pull
+ * the tracker is owed (trackers.pull_requested), and the next pull takes it up even when the
+ * sheet has not changed.
+ */
 function pullLater(trackerIds?: string[]) {
   after(async () => {
     try {
-      await withJobLease("pull", 60, ({ store, source, deadline }) =>
-        pullAll({ store, source }, { force: true, trackerIds, deadline }),
+      const run = await withJobLease(
+        "pull",
+        60,
+        ({ store, source, deadline }) =>
+          pullAll({ store, source }, { force: true, trackerIds, deadline }),
       );
+      if (run.skipped)
+        logEvent("admin.pull_deferred", {
+          trackers: trackerIds?.length ?? "all",
+        });
     } catch (error) {
       logEvent("admin.pull_failed", { error: errorSummary(error) });
     }
@@ -98,6 +132,12 @@ const text = (form: FormData, key: string) =>
   String(form.get(key) ?? "").trim();
 const optional = (form: FormData, key: string) => text(form, key) || null;
 
+/** Two header choices name the same column (nothing and nothing included). */
+const sameHeader = (
+  a: string | null | undefined,
+  b: string | null | undefined,
+) => normaliseKey(a ?? "") === normaliseKey(b ?? "");
+
 // ---------------------------------------------------------------------------------------
 // Tracker setup wizard (11)
 
@@ -114,17 +154,31 @@ const NEXT_STEP: Record<WizardStep, WizardStep | "done"> = {
 
 /**
  * Saves part of a tracker's config. A draft may stay incomplete; a live tracker's config must
- * stay complete, and saving it runs the structure check and a forced pull (11: editing).
+ * stay complete, and saving it runs the structure check and a forced pull (11: editing). No
+ * config may write to a content column (invariant 5). A live tracker's status columns change
+ * only together with their status mapping (saveStatuses), so no pull ever reads a status column
+ * whose words the map does not cover (11 step 5, 6.8).
  */
 async function saveDraft(
   tracker: AdminTracker,
   patch: Partial<DraftConfig>,
+  options: { newStatusColumns?: boolean } = {},
 ): Promise<string | null> {
   const draft = DraftConfig.parse({ ...tracker.draft, ...patch });
+  const conflict = writeTargetProblem(draft.columns ?? {}, draft.titleTemplate);
+  if (conflict) return conflict;
   if (tracker.state !== "draft") {
     const complete = finalConfig(draft);
     if (!complete.success)
       return "This change would leave the tracker incomplete.";
+    const saved = tracker.draft.columns ?? {};
+    const next = draft.columns ?? {};
+    if (
+      !options.newStatusColumns &&
+      (!sameHeader(saved.statusRead, next.statusRead) ||
+        !sameHeader(saved.statusWrite, next.statusWrite))
+    )
+      return "Map the words of the new status column first.";
   }
   const { error } = await createServiceClient()
     .from("trackers")
@@ -148,11 +202,16 @@ function afterSave(tracker: AdminTracker, step: WizardStep): never {
 
 /** 11 step 2: a draft tracker for one tab of a new sheet. */
 export async function startSetup(
-  fileId: string,
-  sheetId: number,
+  fileIdInput: string,
+  sheetIdInput: number,
 ): Promise<FormState> {
   const user = await getCurrentUser();
   if (!user?.isAdmin) return NOT_ADMIN;
+  const parsed = z
+    .object({ fileId: FileId, sheetId: SheetId })
+    .safeParse({ fileId: fileIdInput, sheetId: sheetIdInput });
+  if (!parsed.success) return INVALID;
+  const { fileId, sheetId } = parsed.data;
   const service = createServiceClient();
   const { data: existing } = await service
     .from("trackers")
@@ -235,7 +294,13 @@ export async function saveHeaderRow(
   afterSave(tracker, "header");
 }
 
-/** 11 step 4. Write targets may not hold formulas (N6). */
+/**
+ * 11 step 4. Write targets may not hold formulas (N6) or content (invariant 5), and a
+ * completed-on text pattern must read back as the date it wrote (6.8). When the status
+ * columns change, their words are mapped again (11 step 5): a draft's status map is cleared,
+ * and a live tracker keeps its current status columns until the statuses step maps the new
+ * ones.
+ */
 export async function saveColumns(
   trackerId: string,
   _previous: FormState,
@@ -245,7 +310,10 @@ export async function saveColumns(
   const tracker = await loadTracker(trackerId);
   if (!tracker?.draft.headerRow)
     return { error: "Choose the header row first." };
-  const { structure } = await loadTabData(tracker.ref, tracker.draft.headerRow);
+  const [{ structure }, today] = await Promise.all([
+    loadTabData(tracker.ref, tracker.draft.headerRow),
+    (await loadSheetDeps()).store.today(),
+  ]);
   const headers = new Map(
     structure.headers.map((h) => [h.normalised, h.header]),
   );
@@ -283,18 +351,37 @@ export async function saveColumns(
   if (details.length > 8) return { error: "Choose at most 8 detail columns." };
   const format = text(form, "completedOnFormat");
   const pattern = text(form, "completedOnPattern") || "EEE d MMM";
+  if (completedOn && format !== "date") {
+    const problem = completedOnPatternProblem(pattern, today);
+    if (problem) return { error: problem };
+  }
   const titleTemplate = text(form, "titleTemplate") || `{${title}}`;
+  const columns = {
+    date,
+    title,
+    statusRead,
+    statusWrite,
+    completedOn,
+    owner: pick("owner"),
+    sourceRef: pick("sourceRef"),
+    critical: criticalHeader ? { header: criticalHeader, truthy } : null,
+  };
+  const conflict = writeTargetProblem(columns, titleTemplate);
+  if (conflict) return { error: conflict };
+
+  const saved = tracker.draft.columns ?? {};
+  const readChanged = !sameHeader(saved.statusRead, statusRead);
+  const writeChanged = !sameHeader(saved.statusWrite, statusWrite);
+  const live = tracker.state !== "draft";
+  const pending = live && (readChanged || writeChanged);
   const error = await saveDraft(tracker, {
-    columns: {
-      date,
-      title,
-      statusRead,
-      statusWrite,
-      completedOn,
-      owner: pick("owner"),
-      sourceRef: pick("sourceRef"),
-      critical: criticalHeader ? { header: criticalHeader, truthy } : null,
-    },
+    columns: pending
+      ? {
+          ...columns,
+          statusRead: saved.statusRead,
+          statusWrite: saved.statusWrite ?? null,
+        }
+      : columns,
     readOnlyColumns: structure.headers
       .filter((h) => formula.has(h.normalised))
       .map((h) => h.header),
@@ -306,12 +393,51 @@ export async function saveColumns(
       : format === "date"
         ? { type: "date" }
         : { type: "text", pattern },
+    // A draft whose status columns changed maps its words and write-backs again.
+    ...(!live && readChanged
+      ? { statusMap: undefined, cancelReasons: undefined }
+      : {}),
+    ...(!live && writeChanged ? { writeBack: undefined } : {}),
   });
   if (error) return { error };
+  if (pending)
+    redirect(
+      `/admin/trackers/${tracker.id}/setup/statuses?${new URLSearchParams({
+        statusRead,
+        statusWrite: statusWrite ?? "",
+      }).toString()}`,
+    );
   afterSave(tracker, "columns");
 }
 
-/** 11 step 5: every word mapped, and a write-back value for every Knit status. */
+/**
+ * The new status columns a live tracker's statuses step maps (saveColumns sent them along),
+ * checked against the tab again: null when none were sent.
+ */
+function pendingStatusColumns(
+  form: FormData,
+  structure: TabStructure,
+): { statusRead: string; statusWrite: string | null } | null | "invalid" {
+  if (!form.has("pendingStatusRead")) return null;
+  const header = (value: string) =>
+    structure.headers.find((h) => h.normalised === normaliseKey(value))
+      ?.header ?? null;
+  const statusRead = header(text(form, "pendingStatusRead"));
+  const writeText = text(form, "pendingStatusWrite");
+  const statusWrite = writeText === "" ? null : header(writeText);
+  if (!statusRead || (writeText !== "" && !statusWrite)) return "invalid";
+  if (
+    statusWrite &&
+    structure.formulaColumns.includes(normaliseKey(statusWrite))
+  )
+    return "invalid";
+  return { statusRead, statusWrite };
+}
+
+/**
+ * 11 step 5: every word mapped, and a write-back value for every Knit status, chosen from the
+ * words of the status write column (6.8), or leave the cell unchanged (N8), or clear it.
+ */
 export async function saveStatuses(
   trackerId: string,
   _previous: FormState,
@@ -319,18 +445,27 @@ export async function saveStatuses(
 ): Promise<FormState> {
   if (!(await isAdmin())) return NOT_ADMIN;
   const tracker = await loadTracker(trackerId);
-  const statusHeader = tracker?.draft.columns?.statusRead;
-  if (!tracker?.draft.headerRow || !statusHeader)
+  const saved = tracker?.draft.columns;
+  if (!tracker?.draft.headerRow || !saved?.statusRead)
     return { error: "Map the columns first." };
   const { structure, rows } = await loadTabData(
     tracker.ref,
     tracker.draft.headerRow,
   );
-  const choices = statusChoices(
-    rows,
-    statusHeader,
-    structure.validations[normaliseKey(statusHeader)]?.options ?? null,
-  );
+  const pending =
+    tracker.state === "draft" ? null : pendingStatusColumns(form, structure);
+  if (pending === "invalid")
+    return {
+      error:
+        "Those status columns are not in the tab any more. Map the columns again.",
+    };
+  const statusRead = pending?.statusRead ?? saved.statusRead;
+  const statusWrite = pending
+    ? pending.statusWrite
+    : (saved.statusWrite ?? null);
+  const dropdown = (header: string) =>
+    structure.validations[normaliseKey(header)]?.options ?? null;
+  const choices = statusChoices(rows, statusRead, dropdown(statusRead));
   const statusMap: Record<string, UserStatus> = {};
   const cancelReasons: Record<string, string> = {};
   for (const choice of choices) {
@@ -342,19 +477,35 @@ export async function saveStatuses(
   }
   if (unmappedChoices(choices, statusMap).length > 0)
     return { error: "Choose a Knit status for every word." };
+  const words = writeBackOptions(
+    rows,
+    statusWrite,
+    statusWrite ? dropdown(statusWrite) : null,
+  );
   const writeBack = {} as Record<UserStatus, string | null>;
   for (const status of USER_STATUSES) {
-    const value = String(form.get(writeBackField(status)) ?? "");
-    if (value === "")
+    const posted = String(form.get(writeBackField(status)) ?? "");
+    if (posted === "")
       return { error: "Choose a write-back value for every Knit status." };
-    writeBack[status] =
-      value === LEAVE_UNCHANGED ? null : value === CLEAR_CELL ? "" : value;
+    const value = writeBackValue(posted, words, statusWrite !== null);
+    if (!value.ok)
+      return {
+        error: statusWrite
+          ? `Choose a word that "${statusWrite}" accepts, or leave the cell unchanged.`
+          : "No status write column is mapped: choose Leave unchanged.",
+      };
+    writeBack[status] = value.value;
   }
-  const error = await saveDraft(tracker, {
-    statusMap,
-    cancelReasons,
-    writeBack,
-  });
+  const error = await saveDraft(
+    tracker,
+    {
+      statusMap,
+      cancelReasons,
+      writeBack,
+      ...(pending ? { columns: { ...saved, statusRead, statusWrite } } : {}),
+    },
+    { newStatusColumns: pending !== null },
+  );
   if (error) return { error };
   afterSave(tracker, "statuses");
 }
@@ -392,7 +543,10 @@ export async function saveOwners(
   afterSave(tracker, "owners");
 }
 
-/** 11 step 7. The go-live date can change only before activation. */
+/**
+ * 11 step 7. The go-live date can change only before activation (N19 b). Once saved here it is
+ * the admin's choice; until then it defaults to today (see activateTracker).
+ */
 export async function saveDetails(
   trackerId: string,
   _previous: FormState,
@@ -420,7 +574,13 @@ export async function saveDetails(
       name: parsed.data.name,
       color: parsed.data.color,
       ...(tracker.state === "draft"
-        ? { go_live_date: parsed.data.goLive }
+        ? {
+            go_live_date: parsed.data.goLive,
+            config: DraftConfig.parse({
+              ...tracker.draft,
+              goLiveChosen: true,
+            }),
+          }
         : {}),
     })
     .eq("id", tracker.id);
@@ -431,30 +591,42 @@ export async function saveDetails(
 /**
  * 11 step 9: adds the Knit ID and Knit Note columns, activates the tracker and runs its first
  * pull (which writes the IDs). Then the backlog review (step 10) when old rows are open.
+ * Activation is blocked while any word of the status column, as the tab holds it now, is
+ * unmapped (11 step 5). Go-live is today unless the admin chose a date at step 7.
  */
 export async function activateTracker(trackerId: string): Promise<FormState> {
   if (!(await isAdmin())) return NOT_ADMIN;
+  if (!TrackerId.safeParse(trackerId).success) return INVALID;
   const tracker = await loadTracker(trackerId);
   if (!tracker || tracker.state !== "draft")
     return { error: "Only a tracker being set up can be activated." };
-  const problems = draftProblems(tracker.draft);
-  const config = finalConfig(tracker.draft);
-  if (problems.length > 0 || !config.success)
-    return { error: problems[0]?.problem ?? "The setup is not complete." };
   const service = createServiceClient();
   try {
+    const problems = draftProblems(tracker.draft, {
+      unmappedWords: await unmappedStatusWords(tracker),
+    });
+    const config = finalConfig(tracker.draft);
+    if (problems.length > 0 || !config.success)
+      return { error: problems[0]?.problem ?? "The setup is not complete." };
+    const { store, source } = await loadSheetDeps();
+    const goLive = goLiveDefault(tracker, await store.today());
     const { error } = await service
       .from("trackers")
-      .update({ config: config.data })
+      .update({ config: config.data, go_live_date: goLive })
       .eq("id", tracker.id);
     if (error) throw new Error(error.message);
-    const { store, source } = await loadSheetDeps();
     await source.ensureKnitColumns(tracker.ref, config.data.headerRow);
     await setTrackerState(tracker.id, "active");
     const run = await withJobLease("pull", 60, async () => {
+      // Read before the tracker, as pullAll does, so this first pull serves the requests the
+      // activation itself recorded.
+      const requests = await store.pullRequests([tracker.id]);
       const [synced] = await store.trackers({ ids: [tracker.id] });
       return synced
-        ? pullTracker({ store, source }, synced, { force: true })
+        ? pullTracker({ store, source }, synced, {
+            force: true,
+            request: requests[tracker.id],
+          })
         : null;
     });
     if (!run.skipped && run.result?.outcome === "paused")
@@ -484,48 +656,146 @@ export async function activateTracker(trackerId: string): Promise<FormState> {
 // ---------------------------------------------------------------------------------------
 // Tracker actions (12.8)
 
-export async function pauseTracker(trackerId: string): Promise<void> {
-  if (!(await isAdmin())) return;
+export async function pauseTracker(trackerId: string): Promise<FormState> {
+  if (!(await isAdmin())) return NOT_ADMIN;
+  if (!TrackerId.safeParse(trackerId).success) return INVALID;
   await setTrackerState(trackerId, "paused", "Paused by the admin");
   refresh();
+  return { error: null };
 }
 
-export async function resumeTracker(trackerId: string): Promise<void> {
-  if (!(await isAdmin())) return;
-  await setTrackerState(trackerId, "active");
+const LEFT_FOLDER =
+  "The sheet is not in the Knit folder. Move it back, then Resume.";
+
+/** Why a tracker whose tab does not match its registry cannot resume yet (10.2 step 2, 14). */
+function resumeRefusal(problem: StructureProblem): string {
+  return problem.kind === "missing_knit_id_column"
+    ? "Knit cannot resume yet: the Knit ID column is missing. Restore it in the sheet, or recreate it on this tracker's page."
+    : `Knit cannot resume yet: ${problem.reason}. Fix the sheet or Edit mapping, then Resume.`;
+}
+
+/**
+ * 10.1, 12.8, 14: Resume. Only when the sheet is back in the Knit folder (D14) and the tab
+ * matches the registry again (invariant 7); only then are the write-backs held while it was
+ * paused released, so none of them is written to a tab that is still broken.
+ */
+export async function resumeTracker(trackerId: string): Promise<FormState> {
+  if (!(await isAdmin())) return NOT_ADMIN;
+  if (!TrackerId.safeParse(trackerId).success) return INVALID;
+  const service = createServiceClient();
+  try {
+    const { store, source } = await loadSheetDeps();
+    // The folder as it is now, not as the last pull saw it.
+    await discover({ store, source });
+    const [tracker] = await store.trackers({
+      states: ["paused"],
+      ids: [trackerId],
+    });
+    if (!tracker) return { error: "Only a paused tracker can be resumed." };
+    const { data: file } = await service
+      .from("drive_files")
+      .select("state")
+      .eq("file_id", tracker.fileId)
+      .maybeSingle();
+    if (
+      z.object({ state: z.string() }).safeParse(file).data?.state !==
+      "connected"
+    )
+      return { error: LEFT_FOLDER };
+    const problem = checkStructure(
+      await source.readStructure(
+        { fileId: tracker.fileId, sheetId: tracker.sheetGid },
+        tracker.config.headerRow,
+      ),
+      tracker.config,
+    );
+    if (problem) return { error: resumeRefusal(problem) };
+    const { error } = await service.rpc("set_tracker_state", {
+      p_tracker_id: trackerId,
+      p_state: "active",
+      p_reason: null,
+    });
+    if (error)
+      return {
+        error: error.message.includes("file_outside_folder")
+          ? LEFT_FOLDER
+          : "The tracker could not be resumed. Try again.",
+      };
+  } catch (error) {
+    logEvent("admin.resume_failed", {
+      tracker: trackerId,
+      error: errorSummary(error),
+    });
+    return {
+      error: "Knit could not check the sheet. Try again in a minute.",
+    };
+  }
   pullLater([trackerId]);
   pushLater();
   refresh();
+  return { error: null };
 }
 
-export async function archiveTracker(trackerId: string): Promise<void> {
-  if (!(await isAdmin())) return;
+export async function archiveTracker(trackerId: string): Promise<FormState> {
+  if (!(await isAdmin())) return NOT_ADMIN;
+  if (!TrackerId.safeParse(trackerId).success) return INVALID;
   await setTrackerState(trackerId, "archived");
   redirect("/admin/trackers");
 }
 
-/** 12.8 Sync now for one tracker: a forced pull, now. */
-export async function syncTracker(trackerId: string): Promise<void> {
-  if (!(await isAdmin())) return;
-  await withJobLease("pull", 60, async ({ store, source }) => {
-    await discover({ store, source });
-    return pullAll({ store, source }, { force: true, trackerIds: [trackerId] });
-  });
-  refresh();
+/** 12.8 Sync now for one tracker: a forced pull, now. It says so when it could not run. */
+export async function syncTracker(trackerId: string): Promise<FormState> {
+  if (!(await isAdmin())) return NOT_ADMIN;
+  if (!TrackerId.safeParse(trackerId).success) return INVALID;
+  try {
+    const run = await withJobLease(
+      "pull",
+      60,
+      async ({ store, source, deadline }) => {
+        await discover({ store, source });
+        return pullAll(
+          { store, source },
+          { force: true, trackerIds: [trackerId], deadline },
+        );
+      },
+    );
+    refresh();
+    if (run.skipped)
+      return { error: "A pull is already running. Try again in a minute." };
+    const outcome = run.result[0];
+    if (outcome?.outcome === "paused")
+      return {
+        error: `The tracker was paused: ${outcome.reason}. See Needs Attention.`,
+      };
+    if (outcome?.outcome !== "pulled" && outcome?.outcome !== "skipped")
+      return { error: "The pull did not finish. Sync health shows why." };
+    return { error: null, notice: "Up to date." };
+  } catch (error) {
+    logEvent("admin.sync_failed", {
+      tracker: trackerId,
+      error: errorSummary(error),
+    });
+    return { error: "Sync failed. Knit tries again within 10 minutes." };
+  }
 }
 
 /** 11 step 1: Ignore a new sheet, or list it again. */
 export async function setFileIgnored(
   fileId: string,
   ignored: boolean,
-): Promise<void> {
-  if (!(await isAdmin())) return;
+): Promise<FormState> {
+  if (!(await isAdmin())) return NOT_ADMIN;
+  const parsed = z
+    .object({ fileId: FileId, ignored: z.boolean() })
+    .safeParse({ fileId, ignored });
+  if (!parsed.success) return INVALID;
   const supabase = await getSupabase();
   await supabase.rpc("admin_set_file_state", {
-    p_file_id: fileId,
-    p_state: ignored ? "ignored" : "new",
+    p_file_id: parsed.data.fileId,
+    p_state: parsed.data.ignored ? "ignored" : "new",
   });
   refresh();
+  return { error: null };
 }
 
 /** 14: recreate a deleted Knit ID column after the preview, then resume. */
@@ -533,6 +803,7 @@ export async function recreateKnitIdColumn(
   trackerId: string,
 ): Promise<FormState> {
   if (!(await isAdmin())) return NOT_ADMIN;
+  if (!TrackerId.safeParse(trackerId).success) return INVALID;
   try {
     const { store, source } = await loadSheetDeps();
     const [tracker] = await store.trackers({
@@ -563,20 +834,29 @@ export async function recreateKnitIdColumn(
 // ---------------------------------------------------------------------------------------
 // Needs Attention (12.8): map status, link owner, dismiss, retry
 
-export async function setAttentionState(
-  itemId: number,
-  state: "resolved" | "dismissed",
-): Promise<void> {
-  if (!(await isAdmin())) return;
+async function markAttention(itemId: number, state: "resolved" | "dismissed") {
   const supabase = await getSupabase();
   await supabase.rpc("admin_set_attention_state", {
     p_id: itemId,
     p_state: state,
   });
-  refresh();
 }
 
-/** 6.8: map an unmapped word; the tracker is pulled again at once. */
+export async function setAttentionState(
+  itemId: number,
+  state: "resolved" | "dismissed",
+): Promise<FormState> {
+  if (!(await isAdmin())) return NOT_ADMIN;
+  const parsed = z
+    .object({ itemId: ItemId, state: z.enum(["resolved", "dismissed"]) })
+    .safeParse({ itemId, state });
+  if (!parsed.success) return INVALID;
+  await markAttention(parsed.data.itemId, parsed.data.state);
+  refresh();
+  return { error: null };
+}
+
+/** 6.8, N19(d): map an unmapped word; saving the map pulls the tracker again. */
 export async function mapStatusWord(
   itemId: number,
   trackerId: string,
@@ -585,18 +865,26 @@ export async function mapStatusWord(
   form: FormData,
 ): Promise<FormState> {
   if (!(await isAdmin())) return NOT_ADMIN;
+  const args = z
+    .object({ itemId: ItemId, trackerId: TrackerId, word: StatusWord })
+    .safeParse({ itemId, trackerId, word });
+  if (!args.success) return INVALID;
   const status = KnitUserStatus.safeParse(form.get("status"));
   if (!status.success) return { error: "Choose a Knit status." };
-  const tracker = await loadTracker(trackerId);
+  const tracker = await loadTracker(args.data.trackerId);
   const config = tracker ? TrackerConfig.safeParse(tracker.draft) : null;
   if (!tracker || !config?.success)
     return { error: "This tracker cannot be changed now." };
+  // saveDraft pulls an active tracker again (and records the pull it is owed).
   const error = await saveDraft(tracker, {
-    statusMap: { ...config.data.statusMap, [normaliseKey(word)]: status.data },
+    statusMap: {
+      ...config.data.statusMap,
+      [normaliseKey(args.data.word)]: status.data,
+    },
   });
   if (error) return { error };
-  await setAttentionState(itemId, "resolved");
-  pullLater([trackerId]);
+  await markAttention(args.data.itemId, "resolved");
+  refresh();
   return { error: null };
 }
 
@@ -608,6 +896,10 @@ export async function linkOwnerName(
   form: FormData,
 ): Promise<FormState> {
   if (!(await isAdmin())) return NOT_ADMIN;
+  const args = z
+    .object({ name: OwnerName, itemId: ItemId.nullable() })
+    .safeParse({ name, itemId });
+  if (!args.success) return INVALID;
   const target = text(form, "user");
   const userId = target === "non_user" ? null : z.uuid().safeParse(target).data;
   if (userId === undefined)
@@ -615,23 +907,34 @@ export async function linkOwnerName(
   const { error } = await createServiceClient()
     .from("people_aliases")
     .upsert(
-      { alias_norm: normaliseKey(name), display: name.trim(), user_id: userId },
+      {
+        alias_norm: normaliseKey(args.data.name),
+        display: args.data.name,
+        user_id: userId,
+      },
       { onConflict: "alias_norm" },
     );
   if (error) return { error: "The name could not be saved. Try again." };
-  if (itemId !== null) await setAttentionState(itemId, "resolved");
+  if (args.data.itemId !== null)
+    await markAttention(args.data.itemId, "resolved");
   pullLater();
   refresh();
   return { error: null };
 }
 
 /** 10.4: send failed write-backs again (all, or one task's). */
-export async function retryWrites(taskId: string | null): Promise<void> {
-  if (!(await isAdmin())) return;
+export async function retryWrites(taskId: string | null): Promise<FormState> {
+  if (!(await isAdmin())) return NOT_ADMIN;
+  const parsed = z.uuid().nullable().safeParse(taskId);
+  if (!parsed.success) return INVALID;
   const supabase = await getSupabase();
-  await supabase.rpc("admin_retry_writes", { p_task_id: taskId });
+  const { error } = await supabase.rpc("admin_retry_writes", {
+    p_task_id: parsed.data,
+  });
+  if (error) return { error: messageFor(error) };
   pushLater();
   refresh();
+  return { error: null };
 }
 
 // ---------------------------------------------------------------------------------------
@@ -717,9 +1020,19 @@ export async function createUser(
     role: parsed.data.role,
     is_active: true,
   });
-  if (rowError) return { error: "The user could not be saved. Try again." };
+  if (rowError) {
+    // Undo the login just made, so trying again starts clean (it could not sign in anyway).
+    const { error: undoError } = await service.auth.admin.deleteUser(
+      data.user.id,
+    );
+    if (undoError)
+      logEvent("admin.create_user_undo_failed", {
+        error: errorSummary(undoError),
+      });
+    return { error: "The user could not be saved. Try again." };
+  }
   if (parsed.data.alias) {
-    await service.from("people_aliases").upsert(
+    const { error: aliasError } = await service.from("people_aliases").upsert(
       {
         alias_norm: normaliseKey(parsed.data.alias),
         display: parsed.data.alias,
@@ -727,28 +1040,66 @@ export async function createUser(
       },
       { onConflict: "alias_norm" },
     );
+    if (aliasError) {
+      refresh();
+      return {
+        error: null,
+        notice: `Created ${parsed.data.email}, but the name in trackers could not be saved. Add it under Names in trackers.`,
+      };
+    }
     pullLater();
   }
   refresh();
   return { error: null, notice: `Created ${parsed.data.email}.` };
 }
 
-/** Deactivating also stops the account signing in; the admin cannot deactivate themselves. */
+/**
+ * Deactivating also stops the account signing in; the admin cannot deactivate themselves
+ * (N19 f). The two writes are ordered so a half-done change always leaves the person locked
+ * out rather than let in: deactivating marks the Knit user inactive (which ends their access
+ * to every screen at once) before blocking the login; reactivating unblocks the login before
+ * marking them active.
+ */
 export async function setUserActive(
   userId: string,
   active: boolean,
-): Promise<void> {
+): Promise<FormState> {
   const user = await getCurrentUser();
-  if (!user?.isAdmin || user.id === userId) return;
+  if (!user?.isAdmin) return NOT_ADMIN;
+  const parsed = z
+    .object({ userId: UserId, active: z.boolean() })
+    .safeParse({ userId, active });
+  if (!parsed.success) return INVALID;
+  if (user.id === parsed.data.userId)
+    return { error: "You cannot deactivate your own account." };
   const service = createServiceClient();
-  await service.auth.admin.updateUserById(userId, {
-    ban_duration: active ? "none" : "876000h",
-  });
-  await service
-    .from("app_users")
-    .update({ is_active: active })
-    .eq("id", userId);
+  const login = () =>
+    service.auth.admin.updateUserById(parsed.data.userId, {
+      ban_duration: parsed.data.active ? "none" : "876000h",
+    });
+  const row = () =>
+    service
+      .from("app_users")
+      .update({ is_active: parsed.data.active })
+      .eq("id", parsed.data.userId);
+  if (parsed.data.active) {
+    if ((await login()).error)
+      return { error: "The account could not be reactivated. Try again." };
+    if ((await row()).error)
+      return { error: "The account could not be reactivated. Try again." };
+  } else {
+    if ((await row()).error)
+      return { error: "The account could not be deactivated. Try again." };
+    if ((await login()).error) {
+      refresh();
+      return {
+        error:
+          "Their access is removed, but their sign-in could not be blocked. Try again.",
+      };
+    }
+  }
   refresh();
+  return { error: null };
 }
 
 export async function resetPassword(
@@ -757,10 +1108,12 @@ export async function resetPassword(
   form: FormData,
 ): Promise<FormState> {
   if (!(await isAdmin())) return NOT_ADMIN;
+  const id = UserId.safeParse(userId);
+  if (!id.success) return INVALID;
   const password = z.string().min(8).max(200).safeParse(form.get("password"));
   if (!password.success) return { error: "Use at least 8 characters." };
   const { error } = await createServiceClient().auth.admin.updateUserById(
-    userId,
+    id.data,
     {
       password: password.data,
     },
@@ -784,6 +1137,11 @@ export async function saveAlias(
 // Holidays (12.8): saving refreshes the calendar (trigger), then due dates are recomputed for
 // open task-days by a forced pull (locked ones never change).
 
+/**
+ * 12.8, N19(g): a holiday on a date with open tasks is saved only once the admin confirmed
+ * the number Knit showed them, and only while that number is still the number of open tasks
+ * the date has.
+ */
 export async function addHoliday(
   _previous: FormState,
   form: FormData,
@@ -798,18 +1156,23 @@ export async function addHoliday(
   if (!parsed.success) return { error: "Give a date and a name." };
   const supabase = await getSupabase();
   // 12.8: warn when open tasks sit on or are planned for that date.
-  const { data: impact } = await supabase.rpc("holiday_impact", {
-    p_day: parsed.data.day,
-  });
+  const { data: impact, error: impactError } = await supabase.rpc(
+    "holiday_impact",
+    { p_day: parsed.data.day },
+  );
   const counts = z
     .object({ openTaskDays: z.number(), plannedTasks: z.number() })
     .safeParse(impact);
-  const affected = counts.success
-    ? Math.max(counts.data.openTaskDays, counts.data.plannedTasks)
-    : 0;
-  if (affected > 0 && form.get("confirm") !== "1")
+  if (impactError || !counts.success)
+    return {
+      error:
+        "Knit could not count the open tasks on this date. Try again in a moment.",
+    };
+  const affected = Math.max(counts.data.openTaskDays, counts.data.plannedTasks);
+  if (affected > 0 && form.get("confirm") !== String(affected))
     return {
       error: `${affected} open ${affected === 1 ? "task is" : "tasks are"} on or planned for this date. Their due dates will be recomputed; closed days do not change. Tick the box and save again.`,
+      confirm: affected,
     };
   const { error } = await supabase
     .from("holidays")
@@ -823,17 +1186,20 @@ export async function addHoliday(
   return { error: null, notice: `Saved ${parsed.data.name}.` };
 }
 
-export async function removeHoliday(day: string): Promise<void> {
-  if (!(await isAdmin()) || !isLocalDate(day)) return;
+export async function removeHoliday(day: string): Promise<FormState> {
+  if (!(await isAdmin())) return NOT_ADMIN;
+  if (!isLocalDate(day)) return INVALID;
   const supabase = await getSupabase();
   await supabase.from("holidays").delete().eq("day", day);
   pullLater();
   refresh();
+  return { error: null };
 }
 
 /** 6.2: extend the working-day calendar by a year. */
-export async function extendCalendar(calendarEnd: string): Promise<void> {
-  if (!(await isAdmin()) || !isLocalDate(calendarEnd)) return;
+export async function extendCalendar(calendarEnd: string): Promise<FormState> {
+  if (!(await isAdmin())) return NOT_ADMIN;
+  if (!isLocalDate(calendarEnd)) return INVALID;
   const year = Number(calendarEnd.slice(0, 4)) + 1;
   const supabase = await getSupabase();
   await supabase.rpc("refresh_calendar", {
@@ -841,4 +1207,5 @@ export async function extendCalendar(calendarEnd: string): Promise<void> {
     p_to: `${year}-12-31`,
   });
   refresh();
+  return { error: null };
 }

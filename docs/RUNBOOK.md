@@ -40,7 +40,7 @@ Do the steps in order. Each ends with a check. Placeholders look like `<this>`.
 5. Put each tracker in the folder as a native Google Sheet (for an `.xlsx`: File > Save as Google Sheets, and keep only the Google Sheet).
 6. Create a Google Sheet `Knit Archive` outside the folder, share it with the service account as **Editor**, and copy its id from its URL (the part after `/d/`): this is `KNIT_ARCHIVE_SHEET_ID`.
 
-Check: the service account's email appears under Share on both the folder and the archive sheet.
+Check: put the three Google values in a `.env.local` (never committed) and run `pnpm check:google`. It signs in as the service account, lists the folder, reads every sheet's tabs and checks it can edit each sheet and the archive, and ends with "The Google setup is ready." or a line per problem. It writes nothing.
 
 ### 2.2 Supabase
 

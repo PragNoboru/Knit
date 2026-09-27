@@ -19,7 +19,8 @@
     "test:e2e": "playwright test",
     "db:reset": "supabase db reset",
     "bootstrap:admin": "tsx scripts/bootstrap-admin.ts",
-    "seed:local": "tsx scripts/seed-local.ts"
+    "seed:local": "tsx scripts/seed-local.ts",
+    "check:google": "tsx scripts/check-google.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",

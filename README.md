@@ -18,20 +18,21 @@ Without Google (N16), set `KNIT_SHEET_SOURCE=local` in `.env.local`: the example
 
 ## Commands
 
-| Command                | Does                                                                           |
-| ---------------------- | ------------------------------------------------------------------------------ |
-| `pnpm dev`             | Run the app locally                                                            |
-| `pnpm build`           | Production build                                                               |
-| `pnpm lint`            | ESLint, Prettier check, and the no-em-dash check                               |
-| `pnpm format`          | Format everything with Prettier                                                |
-| `pnpm typecheck`       | Generate Next.js route types, then run `tsc`                                   |
-| `pnpm test`            | Unit and fixture tests (Vitest, always in the UTC zone)                        |
-| `pnpm test:int`        | Integration tests against local Supabase (start it first)                      |
-| `pnpm test:int:pglite` | The same integration tests on in-process Postgres, for machines without Docker |
-| `pnpm db:reset`        | Rebuild the local database from the migrations and seed                        |
-| `pnpm bootstrap:admin` | Create the first admin (safe to run again)                                     |
-| `pnpm seed:local`      | Local admin, member and the example trackers, pulled (local mode only)         |
-| `pnpm test:e2e`        | Playwright flows against a seeded local app (see the e2e job in CI)            |
+| Command                | Does                                                                               |
+| ---------------------- | ---------------------------------------------------------------------------------- |
+| `pnpm dev`             | Run the app locally                                                                |
+| `pnpm build`           | Production build                                                                   |
+| `pnpm lint`            | ESLint, Prettier check, and the no-em-dash check                                   |
+| `pnpm format`          | Format everything with Prettier                                                    |
+| `pnpm typecheck`       | Generate Next.js route types, then run `tsc`                                       |
+| `pnpm test`            | Unit and fixture tests (Vitest, always in the UTC zone)                            |
+| `pnpm test:int`        | Integration tests against local Supabase (start it first)                          |
+| `pnpm test:int:pglite` | The same integration tests on in-process Postgres, for machines without Docker     |
+| `pnpm db:reset`        | Rebuild the local database from the migrations and seed                            |
+| `pnpm bootstrap:admin` | Create the first admin (safe to run again)                                         |
+| `pnpm seed:local`      | Local admin, member and the example trackers, pulled (local mode only)             |
+| `pnpm check:google`    | Read-only check of the Google setup: service account, Knit folder, sheets, archive |
+| `pnpm test:e2e`        | Playwright flows against a seeded local app (see the e2e job in CI)                |
 
 ## Database
 

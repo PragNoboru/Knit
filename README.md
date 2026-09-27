@@ -37,6 +37,12 @@ Without Google (N16), set `KNIT_SHEET_SOURCE=local` in `.env.local`: the example
 
 Migrations live in `supabase/migrations`, one concern each, forward-only, each rule commented with the PRD section it implements. Every mutation goes through an RPC function (`set_task_status`, `close_day`, `admin_correct_task_day`, ...) that checks its caller; signed-in users can only read, and only what row level security allows (PRD 9).
 
+## Tests
+
+- `pnpm test`: the domain rules and the example trackers (Vitest, run in the UTC zone to prove the India-time handling).
+- `pnpm test:int` (local Supabase) or `pnpm test:int:pglite` (no Docker): the SQL functions, row level security, the jobs against in-memory sheets.
+- `pnpm test:e2e`: Playwright flows on a seeded local app. CI runs them with Knit's clock fixed (see the `e2e` job in `.github/workflows/ci.yml`) and keeps screenshots at 1280 px and 390 px as the `playwright` artifact.
+
 ## Deployment
 
-Vercel deployments are switched off in `vercel.json` (`git.deploymentEnabled: false`) until the production deploy in M9. The full runbook arrives in M9 as `docs/RUNBOOK.md`.
+`docs/RUNBOOK.md` covers the production deploy (with its checklist), the jobs, rotating secrets, adding a tracker, going live, and recovering from every failure in PRD section 14. Vercel deployments stay switched off in `vercel.json` (`git.deploymentEnabled: false`) until that deploy.

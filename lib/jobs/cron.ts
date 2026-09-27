@@ -72,17 +72,35 @@ export async function runJob(
   if (!isAuthorisedCron(request, env.KNIT_CRON_SECRET)) {
     return Response.json({ ok: false, error: "unauthorised" }, { status: 401 });
   }
-  const deps = await jobDeps();
-  const deadline = deadlineFor(maxDurationSeconds);
-  const holder = await acquire(deps.store, job, maxDurationSeconds);
-  if (!holder)
-    return Response.json({ ok: true, skipped: "another run holds the lease" });
   try {
-    const result = await work({ ...deps, deadline });
-    return Response.json({ ok: true, ...result });
+    const run = await withJobLease(job, maxDurationSeconds, work);
+    return run.skipped
+      ? Response.json({ ok: true, skipped: "another run holds the lease" })
+      : Response.json({ ok: true, ...run.result });
   } catch (error) {
     logEvent(`${job}.error`, { job, error: errorSummary(error) });
     return Response.json({ ok: false, error: "job_failed" }, { status: 500 });
+  }
+}
+
+/**
+ * Runs `work` under the job's lease and time budget. The cron endpoints use it through
+ * runJob; a server action that has already checked the signed-in user uses it directly
+ * (Sync now, PRD 7.3). `skipped` when another run holds the lease.
+ */
+export async function withJobLease<T>(
+  job: string,
+  maxDurationSeconds: number,
+  work: (
+    deps: Awaited<ReturnType<typeof jobDeps>> & { deadline: number },
+  ) => Promise<T>,
+): Promise<{ skipped: true } | { skipped: false; result: T }> {
+  const deps = await jobDeps();
+  const deadline = deadlineFor(maxDurationSeconds);
+  const holder = await acquire(deps.store, job, maxDurationSeconds);
+  if (!holder) return { skipped: true };
+  try {
+    return { skipped: false, result: await work({ ...deps, deadline }) };
   } finally {
     await deps.store.releaseLease(job, holder);
   }

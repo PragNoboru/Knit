@@ -16,11 +16,14 @@
     "test": "vitest run",
     "test:int": "vitest run --config vitest.integration.config.mts",
     "test:int:pglite": "vitest run --config vitest.integration.config.mts --mode pglite",
+    "test:e2e": "playwright test",
     "db:reset": "supabase db reset",
-    "bootstrap:admin": "tsx scripts/bootstrap-admin.ts"
+    "bootstrap:admin": "tsx scripts/bootstrap-admin.ts",
+    "seed:local": "tsx scripts/seed-local.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",
+    "@supabase/ssr": "^0.12.7",
     "@supabase/supabase-js": "^2.117.1",
     "class-variance-authority": "^0.7.1",
     "cn": "^0.4.0",
@@ -34,6 +37,7 @@
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.8",
+    "@playwright/test": "^1.63.0",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^22",
     "@types/pg": "^8.23.1",

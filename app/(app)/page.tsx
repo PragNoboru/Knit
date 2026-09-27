@@ -1,8 +1,10 @@
-// Today (PRD 12.3). Built in M7; until then only the wordmark renders.
-export default function TodayPage() {
-  return (
-    <main className="mx-auto w-full max-w-5xl px-4 py-10">
-      <h1 className="text-2xl font-semibold tracking-tight">Knit</h1>
-    </main>
-  );
+import { DayScreen } from "./_parts/day-screen";
+
+// PRD 12.3: Today.
+export default async function TodayPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  return <DayScreen day={null} path="/" params={await searchParams} banners />;
 }

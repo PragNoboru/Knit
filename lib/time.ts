@@ -214,3 +214,28 @@ export function minutesIST(now: Date = new Date()): number {
   const p = istParts(now);
   return Number(p.hour) * 60 + Number(p.minute);
 }
+
+/** The first day of the month holding `date`. */
+export function startOfMonth(date: LocalDate): LocalDate {
+  const { year, month } = parts(date);
+  return `${pad(year, 4)}-${pad(month)}-01`;
+}
+
+/** The first day of the month `months` after (or before) the month holding `date`. */
+export function addMonths(date: LocalDate, months: number): LocalDate {
+  const { year, month } = parts(date);
+  const index = year * 12 + (month - 1) + months;
+  return `${pad(Math.floor(index / 12), 4)}-${pad((index % 12) + 1)}-01`;
+}
+
+/** An instant as seen in India: its date and "HH:mm" ("Showing data from 10:40", PRD 12.3). */
+export function istDateTime(instant: Date | string): {
+  date: LocalDate;
+  time: string;
+} {
+  const p = istParts(typeof instant === "string" ? new Date(instant) : instant);
+  return {
+    date: `${p.year}-${p.month}-${p.day}`,
+    time: `${p.hour}:${p.minute}`,
+  };
+}

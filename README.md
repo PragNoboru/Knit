@@ -14,6 +14,8 @@ pnpm bootstrap:admin          # creates the first admin (PRD 18.4); asks for a p
 pnpm dev
 ```
 
+Without Google (N16), set `KNIT_SHEET_SOURCE=local` in `.env.local`: the example trackers in `fixtures/trackers` act as the Knit folder, and every write is kept in `.knit-local/`. Then `pnpm seed:local` (before `pnpm dev`) adds a local admin (`admin@knit.test`) and member (`member@knit.test`), connects the example trackers from today and pulls them; their password is in `.knit-local/seed-credentials.json`. To start again: `pnpm db:reset` and delete `.knit-local/`.
+
 ## Commands
 
 | Command                | Does                                                                           |
@@ -28,6 +30,8 @@ pnpm dev
 | `pnpm test:int:pglite` | The same integration tests on in-process Postgres, for machines without Docker |
 | `pnpm db:reset`        | Rebuild the local database from the migrations and seed                        |
 | `pnpm bootstrap:admin` | Create the first admin (safe to run again)                                     |
+| `pnpm seed:local`      | Local admin, member and the example trackers, pulled (local mode only)         |
+| `pnpm test:e2e`        | Playwright flows against a seeded local app (see the e2e job in CI)            |
 
 ## Database
 

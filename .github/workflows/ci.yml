@@ -78,3 +78,80 @@ jobs:
         run: |
           eval "$(pnpm exec supabase status -o env | grep -E '^[A-Z_]+=' | sed 's/^/export /')"
           pnpm test:int
+
+  e2e:
+    name: End-to-end flows (Playwright)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          cache: true
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: package.json
+      - run: pnpm install --frozen-lockfile
+
+      - name: Start local Supabase
+        run: >
+          pnpm exec supabase start
+          -x realtime,storage-api,imgproxy,mailpit,postgres-meta,studio,edge-runtime,logflare,vector,supavisor
+          > supabase-start.log 2>&1
+
+      - name: Report a failed Supabase start
+        if: failure()
+        run: |
+          cat supabase-start.log
+          message=$(tail -c 4000 supabase-start.log | sed -e ':a' -e 'N' -e '$!ba' -e 's/%/%25/g' -e 's/\r//g' -e 's/\n/%0A/g')
+          echo "::error title=supabase start failed::${message}"
+
+      # N16: local sheet mode, with the example trackers as the Knit folder.
+      - name: App environment
+        run: |
+          eval "$(pnpm exec supabase status -o env | grep -E '^[A-Z_]+=' | sed 's/^/export /')"
+          {
+            echo "NEXT_PUBLIC_SUPABASE_URL=$API_URL"
+            echo "NEXT_PUBLIC_SUPABASE_ANON_KEY=$ANON_KEY"
+            echo "SUPABASE_SERVICE_ROLE_KEY=$SERVICE_ROLE_KEY"
+            echo "KNIT_CRON_SECRET=$(openssl rand -hex 32)"
+            echo "APP_URL=http://localhost:3000"
+            echo "KNIT_SHEET_SOURCE=local"
+          } > .env.local
+          echo "KNIT_SEED_PASSWORD=$(openssl rand -hex 16)" >> "$GITHUB_ENV"
+
+      # PRD 17: time is injected. Knit connects the example trackers on Mon 28 Sep 2026 (go-live),
+      # then its clock moves to Wed 30 Sep and the close job closes 28 and 29 Sep, so the flows
+      # see spillovers and locked days.
+      - name: Seed users and the example trackers on Mon 28 Sep 2026
+        run: |
+          bash scripts/ci-set-clock.sh 2026-09-28
+          pnpm seed:local > seed.log 2>&1 || { cat seed.log; echo "::error title=seed failed::$(tail -c 3000 seed.log | tr '\n' ' ')"; exit 1; }
+      - name: Move to Wed 30 Sep 2026 and close the days between
+        run: |
+          bash scripts/ci-set-clock.sh 2026-09-30
+          pnpm seed:local close > close.log 2>&1 || { cat close.log; echo "::error title=close failed::$(tail -c 3000 close.log | tr '\n' ' ')"; exit 1; }
+      - run: pnpm build
+      - name: Install Chromium
+        run: pnpm exec playwright install --with-deps chromium
+      # Failures also become annotations (Playwright's github reporter), which anyone who can
+      # see the repository can read; the server's own output is kept in e2e.log.
+      - name: End-to-end flows
+        run: |
+          set -o pipefail
+          pnpm test:e2e 2>&1 | tee e2e.log
+      - name: Report the server output of a failed run
+        if: failure()
+        run: echo "::error title=e2e output::$(grep -iE 'error|failed|warn' e2e.log | tail -c 3500 | tr '\n' ' ')"
+
+      # M7: screenshots at 1280 px and 390 px, and the report of any failure.
+      - name: Keep the screenshots and the report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright
+          path: |
+            playwright-report/
+            test-results/screenshots/
+            test-results/output/
+          retention-days: 14

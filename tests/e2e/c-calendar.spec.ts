@@ -34,10 +34,16 @@ test("a closed day is read-only, with a lock", async ({ page }) => {
   await expect(page.getByText("Not Done").first()).toBeVisible();
 });
 
-test("a later day can be pulled forward from the Day view", async ({
+// PRD 17: "pull forward from Calendar".
+test("a later day can be pulled forward from the Calendar", async ({
   page,
 }) => {
-  await page.goto("/day/2026-10-23");
+  await page.goto("/calendar?month=2026-10");
+  await expect(
+    page.getByRole("heading", { name: "October 2026" }),
+  ).toBeVisible();
+  await page.getByRole("link", { name: /^Fri 23 Oct/ }).click();
+  await expect(page).toHaveURL(/month=2026-10&day=2026-10-23/);
   const control = page.getByRole("combobox", {
     name: "Status of Competitor review and geo",
   });
@@ -45,6 +51,12 @@ test("a later day can be pulled forward from the Day view", async ({
   await control.click();
   await page.getByRole("option", { name: "In Progress", exact: true }).click();
   await expect(control).toHaveText("In Progress");
+  // The change is saved, not only shown: it is still there when the Calendar loads again.
+  await expect(page).toHaveURL(/month=2026-10&day=2026-10-23/);
+  await page.reload();
+  await expect(
+    page.getByRole("combobox", { name: "Status of Competitor review and geo" }),
+  ).toHaveText("In Progress");
   await page.goto("/");
   await expect(
     page

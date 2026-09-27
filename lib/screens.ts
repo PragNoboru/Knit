@@ -1,9 +1,10 @@
 import "server-only";
 
+import { cache } from "react";
 import { z } from "zod";
 
 import { BannersData } from "@/lib/domain/banners";
-import { TRACKER_COLORS } from "@/lib/domain/cards";
+import { LocalDateSchema, TRACKER_COLORS } from "@/lib/domain/cards";
 import { DayViewData } from "@/lib/domain/day-view";
 import { MonthData } from "@/lib/domain/month-view";
 import {
@@ -15,6 +16,15 @@ import { callRpc, getSupabase, RpcError } from "@/lib/supabase/server";
 import { istDateTime, type LocalDate } from "@/lib/time";
 
 /** Data for the screens (PRD 12), read as the signed-in user and parsed with zod. */
+
+/**
+ * Today in India, as the database's clock says (knit_today, PRD 9.1), once per request.
+ * Invariant 1: the screens take today from here, never from the Node process clock, so they
+ * agree with Today's data and with the injected clock in tests (PRD 17).
+ */
+export const getKnitToday = cache((): Promise<LocalDate> =>
+  callRpc(LocalDateSchema, "knit_today"),
+);
 
 export function loadDayView(day: LocalDate | null): Promise<DayViewData> {
   return callRpc(DayViewData, "day_view", { p_day: day });

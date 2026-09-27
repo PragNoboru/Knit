@@ -228,20 +228,62 @@ describe("Today groups (12.3)", () => {
     ]);
   });
 
-  it("hides Ongoing on an off day (6.3.3)", () => {
+  it("on an off day hides windows but keeps open-ended tasks under Ongoing (6.3.3, N4)", () => {
+    const window = card({
+      title: "Window",
+      dateKind: "window",
+      plannedStart: "2026-09-21",
+      dueDate: "2026-09-30",
+      taskDay: null,
+    });
+    const open = card({
+      title: "Open",
+      dateKind: "open",
+      dueDate: null,
+      taskDay: null,
+    });
     const view = buildDayView(
       dayData({
         day: "2026-09-27",
         today: "2026-09-27",
         isWorking: false,
         offReason: "Sunday",
-        ongoing: [card({ dateKind: "open", dueDate: null, taskDay: null })],
+        ongoing: [window, open],
       }),
     );
-    expect(view.groups).toEqual([]);
+    expect(titles(view)).toEqual([["Ongoing", ["Open"]]]);
     expect(noticeText(view.notice!)).toBe(
       "Day off (Sunday). Nothing is due or spills here.",
     );
+  });
+
+  it("a past day shows only its own task-days, not early completions (N18 a)", () => {
+    const early = card({
+      title: "Early",
+      dueDate: "2026-09-30",
+      taskDay: {
+        day: "2026-09-30",
+        status: "done",
+        statusChangedOn: "2026-09-24",
+      },
+    });
+    const past = buildDayView(
+      dayData({
+        day: "2026-09-24",
+        today: "2026-09-28",
+        rows: [onDay("not_done", { locked: true })],
+        earlyDone: [early],
+      }),
+    );
+    expect(past.when).toBe("past");
+    expect(
+      past.groups.flatMap((g) => g.rows.map((r) => r.card.title)),
+    ).not.toContain("Early");
+    // Today still lists it in Done today, tagged early (6.5).
+    const today = buildDayView(
+      dayData({ rows: [onDay("yet_to_start")], earlyDone: [early] }),
+    );
+    expect(today.groups.at(-1)!.rows).toEqual([{ card: early, early: true }]);
   });
 
   it("titles other days without 'today' (N18)", () => {
@@ -321,6 +363,75 @@ describe("empty and edge states (12.7)", () => {
       kind: "all_clear",
       nextWorkingDay: "2026-09-25",
     });
+  });
+
+  it("the notice never offers a task a group already shows (N18 b)", () => {
+    // All clear, but tomorrow's task T was pulled forward: it shows under Pulled forward only.
+    const pulled = card({
+      title: "Pulled",
+      dueDate: "2026-09-25",
+      taskDay: { day: "2026-09-25", status: "in_progress" },
+    });
+    const early = card({
+      title: "Early",
+      dueDate: "2026-09-25",
+      taskDay: {
+        day: "2026-09-25",
+        status: "done",
+        statusChangedOn: "2026-09-24",
+      },
+    });
+    const window = card({
+      title: "Window",
+      dateKind: "window",
+      plannedStart: "2026-09-21",
+      dueDate: "2026-09-25",
+      taskDay: null,
+    });
+    const other = card({
+      title: "Other",
+      dueDate: "2026-09-25",
+      taskDay: { day: "2026-09-25" },
+    });
+    const clear = buildDayView(
+      dayData({
+        rows: [onDay("done")],
+        ongoing: [window],
+        pulledForward: [pulled],
+        earlyDone: [early],
+        nextDayRows: [
+          pulled,
+          early,
+          { ...window, taskDay: other.taskDay },
+          other,
+        ],
+      }),
+    );
+    expect(clear.notice).toMatchObject({
+      kind: "all_clear",
+      nextDayRows: [other],
+    });
+    const shown = [
+      ...clear.groups.flatMap((g) => g.rows.map((r) => r.card.taskId)),
+      ...(clear.notice?.kind === "all_clear"
+        ? clear.notice.nextDayRows.map((c) => c.taskId)
+        : []),
+    ];
+    expect(new Set(shown).size).toBe(shown.length);
+
+    // Nothing planned today while a window runs: the window is under Ongoing, not offered.
+    const later = card({ title: "Later", dueDate: "2026-10-07" });
+    const nothing = buildDayView(
+      dayData({
+        ongoing: [window],
+        upcoming: [{ ...window, taskDay: other.taskDay }, later],
+      }),
+    );
+    expect(nothing.notice).toEqual({
+      kind: "nothing_planned",
+      upcoming: [later],
+    });
+    expect(titles(nothing)).toEqual([["Ongoing", ["Window"]]]);
   });
 
   it("an admin with trackers but no tasks of their own sees the day as usual", () => {

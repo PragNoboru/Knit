@@ -37,10 +37,14 @@ import {
   writeTargetProblem,
   type WizardStep,
 } from "@/lib/domain/wizard";
-import { messageFor } from "@/lib/errors";
+import { messageFor, SIGNED_OUT_ERROR } from "@/lib/errors";
 import { withJobLease } from "@/lib/jobs/cron";
-import type { TabStructure } from "@/lib/sheets/types";
-import { getCurrentUser, getSupabase } from "@/lib/supabase/server";
+import { SheetError, type TabStructure } from "@/lib/sheets/types";
+import {
+  getCurrentUser,
+  getSupabase,
+  type CurrentUser,
+} from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { discover } from "@/lib/sync/discover";
 import { errorSummary, logEvent } from "@/lib/sync/log";
@@ -66,7 +70,21 @@ const NOT_ADMIN: FormState = { error: "Only the admin can do this." };
 const INVALID: FormState = {
   error: "This is no longer valid. Reload the page and try again.",
 };
-const isAdmin = async () => (await getCurrentUser())?.isAdmin === true;
+
+/**
+ * The caller must be the active admin. A caller whose session has ended is told to sign in
+ * again, as the task actions do (proxy.ts leaves an action call to the action's own check),
+ * and only a signed-in user who is not the admin is told this is for the admin.
+ */
+async function adminGate(): Promise<
+  { user: CurrentUser; refusal: null } | { user: null; refusal: FormState }
+> {
+  const user = await getCurrentUser();
+  if (!user) return { user: null, refusal: { error: SIGNED_OUT_ERROR } };
+  if (!user.isAdmin) return { user: null, refusal: NOT_ADMIN };
+  return { user, refusal: null };
+}
+const adminRefusal = async () => (await adminGate()).refusal;
 
 // 9.3: the arguments pages bind to these actions arrive as the browser sends them.
 const TrackerId = z.uuid();
@@ -205,8 +223,8 @@ export async function startSetup(
   fileIdInput: string,
   sheetIdInput: number,
 ): Promise<FormState> {
-  const user = await getCurrentUser();
-  if (!user?.isAdmin) return NOT_ADMIN;
+  const { user, refusal } = await adminGate();
+  if (!user) return refusal;
   const parsed = z
     .object({ fileId: FileId, sheetId: SheetId })
     .safeParse({ fileId: fileIdInput, sheetId: sheetIdInput });
@@ -279,7 +297,8 @@ export async function saveHeaderRow(
   _previous: FormState,
   form: FormData,
 ): Promise<FormState> {
-  if (!(await isAdmin())) return NOT_ADMIN;
+  const denied = await adminRefusal();
+  if (denied) return denied;
   const tracker = await loadTracker(trackerId);
   if (!tracker) return { error: "This tracker no longer exists." };
   const headerRow = z.coerce
@@ -306,7 +325,8 @@ export async function saveColumns(
   _previous: FormState,
   form: FormData,
 ): Promise<FormState> {
-  if (!(await isAdmin())) return NOT_ADMIN;
+  const denied = await adminRefusal();
+  if (denied) return denied;
   const tracker = await loadTracker(trackerId);
   if (!tracker?.draft.headerRow)
     return { error: "Choose the header row first." };
@@ -443,7 +463,8 @@ export async function saveStatuses(
   _previous: FormState,
   form: FormData,
 ): Promise<FormState> {
-  if (!(await isAdmin())) return NOT_ADMIN;
+  const denied = await adminRefusal();
+  if (denied) return denied;
   const tracker = await loadTracker(trackerId);
   const saved = tracker?.draft.columns;
   if (!tracker?.draft.headerRow || !saved?.statusRead)
@@ -516,7 +537,8 @@ export async function saveOwners(
   _previous: FormState,
   form: FormData,
 ): Promise<FormState> {
-  if (!(await isAdmin())) return NOT_ADMIN;
+  const denied = await adminRefusal();
+  if (denied) return denied;
   const tracker = await loadTracker(trackerId);
   if (!tracker) return { error: "This tracker no longer exists." };
   const parsed = z
@@ -552,7 +574,8 @@ export async function saveDetails(
   _previous: FormState,
   form: FormData,
 ): Promise<FormState> {
-  if (!(await isAdmin())) return NOT_ADMIN;
+  const denied = await adminRefusal();
+  if (denied) return denied;
   const tracker = await loadTracker(trackerId);
   if (!tracker) return { error: "This tracker no longer exists." };
   const parsed = z
@@ -595,7 +618,8 @@ export async function saveDetails(
  * unmapped (11 step 5). Go-live is today unless the admin chose a date at step 7.
  */
 export async function activateTracker(trackerId: string): Promise<FormState> {
-  if (!(await isAdmin())) return NOT_ADMIN;
+  const denied = await adminRefusal();
+  if (denied) return denied;
   if (!TrackerId.safeParse(trackerId).success) return INVALID;
   const tracker = await loadTracker(trackerId);
   if (!tracker || tracker.state !== "draft")
@@ -657,9 +681,21 @@ export async function activateTracker(trackerId: string): Promise<FormState> {
 // Tracker actions (12.8)
 
 export async function pauseTracker(trackerId: string): Promise<FormState> {
-  if (!(await isAdmin())) return NOT_ADMIN;
+  const denied = await adminRefusal();
+  if (denied) return denied;
   if (!TrackerId.safeParse(trackerId).success) return INVALID;
-  await setTrackerState(trackerId, "paused", "Paused by the admin");
+  try {
+    await setTrackerState(trackerId, "paused", "Paused by the admin");
+  } catch (error) {
+    // A refused change (the tracker was archived meanwhile) is said in plain language.
+    logEvent("admin.pause_failed", {
+      tracker: trackerId,
+      error: errorSummary(error),
+    });
+    return {
+      error: "The tracker could not be paused. Reload the page and try again.",
+    };
+  }
   refresh();
   return { error: null };
 }
@@ -675,12 +711,33 @@ function resumeRefusal(problem: StructureProblem): string {
 }
 
 /**
+ * The tracker's sheet or tab is gone (deleted, or no longer shared with Knit): not a passing
+ * failure, so the admin is told which, as the structure job tells them (14).
+ */
+const sheetMissing = (error: unknown) =>
+  error instanceof SheetError &&
+  (error.code === "tab_not_found" || error.code === "file_not_found");
+
+/** D14: the tracker's sheet is in the Knit folder, as discover just listed it. */
+async function inKnitFolder(fileId: string): Promise<boolean> {
+  const { data: file } = await createServiceClient()
+    .from("drive_files")
+    .select("state")
+    .eq("file_id", fileId)
+    .maybeSingle();
+  return (
+    z.object({ state: z.string() }).safeParse(file).data?.state === "connected"
+  );
+}
+
+/**
  * 10.1, 12.8, 14: Resume. Only when the sheet is back in the Knit folder (D14) and the tab
  * matches the registry again (invariant 7); only then are the write-backs held while it was
  * paused released, so none of them is written to a tab that is still broken.
  */
 export async function resumeTracker(trackerId: string): Promise<FormState> {
-  if (!(await isAdmin())) return NOT_ADMIN;
+  const denied = await adminRefusal();
+  if (denied) return denied;
   if (!TrackerId.safeParse(trackerId).success) return INVALID;
   const service = createServiceClient();
   try {
@@ -692,16 +749,7 @@ export async function resumeTracker(trackerId: string): Promise<FormState> {
       ids: [trackerId],
     });
     if (!tracker) return { error: "Only a paused tracker can be resumed." };
-    const { data: file } = await service
-      .from("drive_files")
-      .select("state")
-      .eq("file_id", tracker.fileId)
-      .maybeSingle();
-    if (
-      z.object({ state: z.string() }).safeParse(file).data?.state !==
-      "connected"
-    )
-      return { error: LEFT_FOLDER };
+    if (!(await inKnitFolder(tracker.fileId))) return { error: LEFT_FOLDER };
     const problem = checkStructure(
       await source.readStructure(
         { fileId: tracker.fileId, sheetId: tracker.sheetGid },
@@ -722,6 +770,11 @@ export async function resumeTracker(trackerId: string): Promise<FormState> {
           : "The tracker could not be resumed. Try again.",
       };
   } catch (error) {
+    if (sheetMissing(error))
+      return {
+        error:
+          "Knit cannot resume yet: the sheet or tab cannot be found. Restore the sheet or its tab, then Resume.",
+      };
     logEvent("admin.resume_failed", {
       tracker: trackerId,
       error: errorSummary(error),
@@ -737,15 +790,28 @@ export async function resumeTracker(trackerId: string): Promise<FormState> {
 }
 
 export async function archiveTracker(trackerId: string): Promise<FormState> {
-  if (!(await isAdmin())) return NOT_ADMIN;
+  const denied = await adminRefusal();
+  if (denied) return denied;
   if (!TrackerId.safeParse(trackerId).success) return INVALID;
-  await setTrackerState(trackerId, "archived");
+  try {
+    await setTrackerState(trackerId, "archived");
+  } catch (error) {
+    logEvent("admin.archive_failed", {
+      tracker: trackerId,
+      error: errorSummary(error),
+    });
+    return {
+      error:
+        "The tracker could not be archived. Reload the page and try again.",
+    };
+  }
   redirect("/admin/trackers");
 }
 
 /** 12.8 Sync now for one tracker: a forced pull, now. It says so when it could not run. */
 export async function syncTracker(trackerId: string): Promise<FormState> {
-  if (!(await isAdmin())) return NOT_ADMIN;
+  const denied = await adminRefusal();
+  if (denied) return denied;
   if (!TrackerId.safeParse(trackerId).success) return INVALID;
   try {
     const run = await withJobLease(
@@ -784,7 +850,8 @@ export async function setFileIgnored(
   fileId: string,
   ignored: boolean,
 ): Promise<FormState> {
-  if (!(await isAdmin())) return NOT_ADMIN;
+  const denied = await adminRefusal();
+  if (denied) return denied;
   const parsed = z
     .object({ fileId: FileId, ignored: z.boolean() })
     .safeParse({ fileId, ignored });
@@ -798,14 +865,28 @@ export async function setFileIgnored(
   return { error: null };
 }
 
-/** 14: recreate a deleted Knit ID column after the preview, then resume. */
+/** Why the Knit ID column cannot be recreated yet: the tab has another problem to fix first. */
+const recreateRefusal = (problem: StructureProblem) =>
+  `Knit cannot recreate the Knit ID column yet: ${problem.reason}. Fix the sheet or Edit mapping, then try again.`;
+
+/**
+ * 14, N43, N19(e): recreate a deleted Knit ID column after the preview, then resume. It is held
+ * to what Resume is held to, before anything is written: the folder is listed first and a sheet
+ * outside it is refused (D14), and the tab must have no problem but the missing Knit ID column.
+ * A doubled Knit ID column, or one holding formulas (N39), is fixed in the sheet and resumed,
+ * never written over (invariant 2). Once the columns are added the tab is checked again, so the
+ * tracker resumes only when it passes the structure check (invariant 7).
+ */
 export async function recreateKnitIdColumn(
   trackerId: string,
 ): Promise<FormState> {
-  if (!(await isAdmin())) return NOT_ADMIN;
+  const denied = await adminRefusal();
+  if (denied) return denied;
   if (!TrackerId.safeParse(trackerId).success) return INVALID;
   try {
     const { store, source } = await loadSheetDeps();
+    // The folder as it is now, not as the last pull saw it.
+    await discover({ store, source });
     const [tracker] = await store.trackers({
       states: ["paused"],
       ids: [trackerId],
@@ -814,8 +895,34 @@ export async function recreateKnitIdColumn(
       return {
         error: "Only a paused tracker's Knit ID column can be recreated.",
       };
+    if (!(await inKnitFolder(tracker.fileId))) return { error: LEFT_FOLDER };
+    const ref = { fileId: tracker.fileId, sheetId: tracker.sheetGid };
+    const { headerRow } = tracker.config;
+    const check = async () =>
+      checkStructure(
+        await source.readStructure(ref, headerRow),
+        tracker.config,
+      );
+    // No problem at all is a column a recreate that stopped halfway already added: it carries
+    // on and writes the IDs (invariant 8).
+    const before = await check();
+    if (before && before.kind !== "missing_knit_id_column")
+      return { error: recreateRefusal(before) };
+    await source.ensureKnitColumns(ref, headerRow);
+    const added = await check();
+    if (added) return { error: recreateRefusal(added) };
     const result = await recreateKnitIds({ store, source }, tracker);
-    await setTrackerState(trackerId, "active");
+    const { error } = await createServiceClient().rpc("set_tracker_state", {
+      p_tracker_id: trackerId,
+      p_state: "active",
+      p_reason: null,
+    });
+    if (error)
+      return {
+        error: error.message.includes("file_outside_folder")
+          ? LEFT_FOLDER
+          : "The Knit IDs were written, but the tracker could not be resumed. Try again.",
+      };
     pullLater([trackerId]);
     refresh();
     return {
@@ -823,6 +930,11 @@ export async function recreateKnitIdColumn(
       notice: `Recreated ${result.written} Knit IDs${result.cleared > 0 ? `; ${result.cleared} rows moved meanwhile and get new IDs` : ""}.`,
     };
   } catch (error) {
+    if (sheetMissing(error))
+      return {
+        error:
+          "Knit cannot recreate the Knit ID column yet: the sheet or tab cannot be found. Restore the sheet or its tab, then try again.",
+      };
     logEvent("admin.recreate_failed", {
       tracker: trackerId,
       error: errorSummary(error),
@@ -846,7 +958,8 @@ export async function setAttentionState(
   itemId: number,
   state: "resolved" | "dismissed",
 ): Promise<FormState> {
-  if (!(await isAdmin())) return NOT_ADMIN;
+  const denied = await adminRefusal();
+  if (denied) return denied;
   const parsed = z
     .object({ itemId: ItemId, state: z.enum(["resolved", "dismissed"]) })
     .safeParse({ itemId, state });
@@ -864,7 +977,8 @@ export async function mapStatusWord(
   _previous: FormState,
   form: FormData,
 ): Promise<FormState> {
-  if (!(await isAdmin())) return NOT_ADMIN;
+  const denied = await adminRefusal();
+  if (denied) return denied;
   const args = z
     .object({ itemId: ItemId, trackerId: TrackerId, word: StatusWord })
     .safeParse({ itemId, trackerId, word });
@@ -895,7 +1009,8 @@ export async function linkOwnerName(
   _previous: FormState,
   form: FormData,
 ): Promise<FormState> {
-  if (!(await isAdmin())) return NOT_ADMIN;
+  const denied = await adminRefusal();
+  if (denied) return denied;
   const args = z
     .object({ name: OwnerName, itemId: ItemId.nullable() })
     .safeParse({ name, itemId });
@@ -924,7 +1039,8 @@ export async function linkOwnerName(
 
 /** 10.4: send failed write-backs again (all, or one task's). */
 export async function retryWrites(taskId: string | null): Promise<FormState> {
-  if (!(await isAdmin())) return NOT_ADMIN;
+  const denied = await adminRefusal();
+  if (denied) return denied;
   const parsed = z.uuid().nullable().safeParse(taskId);
   if (!parsed.success) return INVALID;
   const supabase = await getSupabase();
@@ -944,7 +1060,8 @@ export async function backlogAction(
   _previous: FormState,
   form: FormData,
 ): Promise<FormState> {
-  if (!(await isAdmin())) return NOT_ADMIN;
+  const denied = await adminRefusal();
+  if (denied) return denied;
   const parsed = z
     .object({
       taskIds: z.array(z.uuid()).min(1),
@@ -982,7 +1099,8 @@ export async function createUser(
   _previous: FormState,
   form: FormData,
 ): Promise<FormState> {
-  if (!(await isAdmin())) return NOT_ADMIN;
+  const denied = await adminRefusal();
+  if (denied) return denied;
   const parsed = z
     .object({
       name: z.string().trim().min(1).max(80),
@@ -1064,8 +1182,8 @@ export async function setUserActive(
   userId: string,
   active: boolean,
 ): Promise<FormState> {
-  const user = await getCurrentUser();
-  if (!user?.isAdmin) return NOT_ADMIN;
+  const { user, refusal } = await adminGate();
+  if (!user) return refusal;
   const parsed = z
     .object({ userId: UserId, active: z.boolean() })
     .safeParse({ userId, active });
@@ -1107,7 +1225,8 @@ export async function resetPassword(
   _previous: FormState,
   form: FormData,
 ): Promise<FormState> {
-  if (!(await isAdmin())) return NOT_ADMIN;
+  const denied = await adminRefusal();
+  if (denied) return denied;
   const id = UserId.safeParse(userId);
   if (!id.success) return INVALID;
   const password = z.string().min(8).max(200).safeParse(form.get("password"));
@@ -1146,7 +1265,8 @@ export async function addHoliday(
   _previous: FormState,
   form: FormData,
 ): Promise<FormState> {
-  if (!(await isAdmin())) return NOT_ADMIN;
+  const denied = await adminRefusal();
+  if (denied) return denied;
   const parsed = z
     .object({
       day: z.string().refine(isLocalDate),
@@ -1187,7 +1307,8 @@ export async function addHoliday(
 }
 
 export async function removeHoliday(day: string): Promise<FormState> {
-  if (!(await isAdmin())) return NOT_ADMIN;
+  const denied = await adminRefusal();
+  if (denied) return denied;
   if (!isLocalDate(day)) return INVALID;
   const supabase = await getSupabase();
   await supabase.from("holidays").delete().eq("day", day);
@@ -1198,7 +1319,8 @@ export async function removeHoliday(day: string): Promise<FormState> {
 
 /** 6.2: extend the working-day calendar by a year. */
 export async function extendCalendar(calendarEnd: string): Promise<FormState> {
-  if (!(await isAdmin())) return NOT_ADMIN;
+  const denied = await adminRefusal();
+  if (denied) return denied;
   if (!isLocalDate(calendarEnd)) return INVALID;
   const year = Number(calendarEnd.slice(0, 4)) + 1;
   const supabase = await getSupabase();

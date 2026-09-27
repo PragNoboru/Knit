@@ -18,8 +18,8 @@ import {
   loadAdminTrackers,
   loadSheetDeps,
   loadTracker,
-  pausedForMissingKnitIds,
 } from "@/lib/admin/data";
+import { pausedForMissingKnitIds } from "@/lib/admin/pause";
 import { STATUS_LABELS } from "@/lib/domain/status";
 import { previewKnitIdRecreate } from "@/lib/sync/recreate-ids";
 import { formatDay, formatInstant } from "@/lib/time";

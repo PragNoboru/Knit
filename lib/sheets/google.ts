@@ -32,8 +32,14 @@ import {
  *
  * Quotas (7.4: "stay well below them"): every call shares the service account's per-minute
  * read quota, so a tab's title is looked up once and reused for a few seconds by the calls of
- * the same job, and range-fed dropdowns are read in one batch. A reused title that no longer
- * names the tab (renamed meanwhile) is looked up again, once.
+ * the same job, and range-fed dropdowns are read in one batch.
+ *
+ * A title can name another tab by the time it is used (the tab renamed, and a copy given its
+ * old name), and the Values API addresses a tab by title only. So every call checks that the
+ * title still names the tab by sheetId: readStructure through the sheetId in its own answer,
+ * the Values reads with a small lookup after they ran, and a write with that lookup right
+ * before it is sent (after its header row is read). A title that turns out stale (it names
+ * another tab, or none: 400) is looked up again and the call runs once more.
  */
 
 const SHEETS = "https://sheets.googleapis.com/v4/spreadsheets";
@@ -138,15 +144,15 @@ export class GoogleSheetSource implements SheetSource {
   }
 
   /**
-   * Runs `work` with the tab's current title. When a reused title turns out to be stale (the
-   * range cannot be parsed, 400, or it names another tab), the title is looked up again and
-   * `work` runs once more: a 400 means Google applied nothing.
+   * Runs `work` with the tab's current title. When the title turns out to be stale (the range
+   * cannot be parsed, 400, or it names another tab), the title is looked up again and `work`
+   * runs once more: a 400 means Google applied nothing, and a write checks its title before it
+   * is sent (confirmTab), so nothing went to another tab.
    */
   private async onTab<T>(
     ref: TabRef,
     work: (title: string) => Promise<T>,
   ): Promise<T> {
-    const reused = this.isCached(ref.fileId);
     const title = await this.tabTitle(ref);
     try {
       return await work(title);
@@ -154,10 +160,30 @@ export class GoogleSheetSource implements SheetSource {
       const stale =
         error instanceof StaleTabTitle ||
         (error instanceof SheetError && error.status === 400);
-      if (!reused || !stale) throw error;
+      if (!stale) throw error;
       this.tabCache.delete(ref.fileId);
       return work(await this.tabTitle(ref));
     }
+  }
+
+  /**
+   * 7.4: tabs are kept by sheetId. Checks that `title` still names the tab `ref` points at, so
+   * a Values API call made with it reached that tab and not one that took its title since. A
+   * read is checked after it ran, a write right before it is sent. A title that now names
+   * another tab throws StaleTabTitle; one that names no tab gets Google's 400.
+   */
+  private async confirmTab(ref: TabRef, title: string): Promise<void> {
+    const params = new URLSearchParams({
+      ranges: `${a1Title(title)}!A1`,
+      fields: "sheets.properties.sheetId",
+    });
+    const body = await this.request<{
+      sheets?: { properties?: { sheetId?: number } }[];
+    }>(`${SHEETS}/${ref.fileId}?${params}`);
+    const sheet = body.sheets?.[0];
+    // Google leaves a sheetId of 0 out of its answer, like any default value.
+    if (!sheet || (sheet.properties?.sheetId ?? 0) !== ref.sheetId)
+      throw new StaleTabTitle();
   }
 
   private async values(
@@ -333,6 +359,7 @@ export class GoogleSheetSource implements SheetSource {
         `${a1Title(title)}!1:${count}`,
         "FORMATTED_VALUE",
       );
+      await this.confirmTab(ref, title);
       return rows.map((row) => row.map(cellText));
     });
   }
@@ -448,6 +475,9 @@ export class GoogleSheetSource implements SheetSource {
           `${SHEETS}/${ref.fileId}/values:batchGet?${params("FORMATTED_VALUE")}`,
         ),
       ]);
+      // The rows are this tab's, not one that took its title (identity and the
+      // verify-after-write read them, 10.4).
+      await this.confirmTab(ref, title);
       const rawRows = raw.valueRanges?.[0]?.values ?? [];
       const shownRows = shown.valueRanges?.[0]?.values ?? [];
       const headers = (shownRows[0] ?? []).flatMap((value, index) => {
@@ -494,6 +524,7 @@ export class GoogleSheetSource implements SheetSource {
         `${a1Title(title)}!${column.letter}${headerRow + 1}:${column.letter}`,
         "FORMATTED_VALUE",
       );
+      await this.confirmTab(ref, title);
       return rows.map((row, i) => ({
         row: headerRow + 1 + i,
         value: cellText(row[0]),
@@ -524,6 +555,8 @@ export class GoogleSheetSource implements SheetSource {
       `${a1Title(tab.title)}!A${headerRow}:ZZZ`,
       "FORMULA",
     );
+    // Where the columns go was read by title: from this tab, not one that took its title.
+    await this.confirmTab(ref, tab.title);
     const first =
       used.reduce(
         (last, row) => Math.max(last, lastFilled(row)),
@@ -621,6 +654,10 @@ export class GoogleSheetSource implements SheetSource {
           throw new SheetError(`No column "${header}"`, "header_not_found");
         return column.letter;
       };
+      // The header row, and so every cell written below it, is this tab's (7.4: tabs are kept
+      // by sheetId): checked right before the write is sent. The verify-after-write read is
+      // checked the same way, so a write that still went astray is caught there (10.4).
+      await this.confirmTab(ref, title);
       // 7.4: one batch per tracker, USER_ENTERED. Text gets a leading apostrophe so Sheets keeps
       // it as text (a status word or "Mon 28 Sep" is never turned into a date); dates go in as
       // dates. Fixed cells, so sending it twice gives the same result.

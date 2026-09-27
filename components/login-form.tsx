@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { signIn, type SignInState } from "@/lib/actions/auth";
+import { withRequestErrors } from "@/lib/actions/call";
 
 /** PRD 12.1 /login: email and password (D6: the admin creates every login). */
 export function LoginForm({
@@ -15,8 +16,9 @@ export function LoginForm({
   next: string | undefined;
   notice: string | null;
 }) {
+  // N48: a sign-in that never reached the server says so here, not on the error page.
   const [state, action, pending] = useActionState<SignInState, FormData>(
-    signIn,
+    withRequestErrors(signIn, (error): SignInState => ({ error })),
     { error: notice },
   );
   return (

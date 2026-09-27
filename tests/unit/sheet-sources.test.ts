@@ -817,9 +817,151 @@ describe("GoogleSheetSource (PRD 7.4)", () => {
     title = "New";
     const rows = await source.readRows(ref, 1);
     expect(rows).toHaveLength(1);
-    expect(calls.filter((c) => c.url.searchParams.has("fields"))).toHaveLength(
-      2,
-    );
+    // Tab lookups (the title checks name a range; the lookups do not).
+    expect(
+      calls.filter(
+        (c) =>
+          c.url.searchParams.has("fields") && !c.url.searchParams.has("ranges"),
+      ),
+    ).toHaveLength(2);
+  });
+
+  describe("another tab took the old title within the reuse window (review R7)", () => {
+    // The tracker's tab (sheetId 7) is duplicated, renamed away, and the copy (sheetId 9,
+    // carrying the same Knit IDs) is given the old title, seconds after a job looked it up.
+    function swappedTabs() {
+      let tabs = [
+        { sheetId: 7, title: "Tasks" },
+        { sheetId: 9, title: "Copy of Tasks" },
+      ];
+      const byRange = (range: string | null) =>
+        tabs.find((t) => t.title === /^'(.*)'!/.exec(range ?? "")?.[1]);
+      const fake = fakeGoogle([
+        [
+          /fields=sheets\.properties\.sheetId/,
+          (url) => {
+            const tab = byRange(url.searchParams.get("ranges"));
+            return tab ? { sheets: [{ properties: tab }] } : badRange();
+          },
+        ],
+        [
+          /fields=sheets\.properties/,
+          () => ({ sheets: tabs.map((properties) => ({ properties })) }),
+        ],
+        [
+          /includeGridData=true/,
+          (url) => ({
+            sheets: [
+              {
+                properties: {
+                  sheetId: byRange(url.searchParams.get("ranges"))!.sheetId,
+                },
+                data: [{ rowData: [{ values: [typed("Status")] }] }],
+              },
+            ],
+          }),
+        ],
+        [
+          /values:batchGet/,
+          (url) => {
+            const tab = byRange(url.searchParams.get("ranges"));
+            return tab
+              ? {
+                  valueRanges: [
+                    {
+                      values: [
+                        ["Status"],
+                        [tab.sheetId === 7 ? "the tracker" : "the copy"],
+                      ],
+                    },
+                  ],
+                }
+              : badRange();
+          },
+        ],
+        [/values:batchUpdate/, () => ({})],
+        [
+          /values\/'/,
+          (url) => {
+            const range = decodeURIComponent(
+              url.pathname.split("/values/")[1]!,
+            );
+            const tab = byRange(range);
+            if (!tab) return badRange();
+            const mark = tab.sheetId === 7 ? "the tracker" : "the copy";
+            if (range.endsWith("!1:1")) return { values: [["Status"]] };
+            if (range.endsWith("!1:2")) return { values: [["Status"], [mark]] };
+            return { values: [[mark]] };
+          },
+        ],
+      ]);
+      const swap = () => {
+        tabs = [
+          { sheetId: 7, title: "Tasks (old)" },
+          { sheetId: 9, title: "Tasks" },
+        ];
+      };
+      return { ...fake, swap };
+    }
+
+    it("reads the rows of the tab by sheetId", async () => {
+      const { source, swap } = swappedTabs();
+      await source.readStructure(ref, 1);
+      swap();
+      const rows = await source.readRows(ref, 1);
+      expect(rows.map((r) => r.cells.status!.formatted)).toEqual([
+        "the tracker",
+      ]);
+    });
+
+    it("writes to the tab by sheetId, never to the copy that took its title", async () => {
+      const { source, calls, swap } = swappedTabs();
+      await source.readStructure(ref, 1);
+      swap();
+      await source.writeCells(ref, 1, [
+        { row: 5, header: "Status", kind: "text", value: "Done" },
+      ]);
+      const writes = calls.filter((c) =>
+        c.url.pathname.endsWith("values:batchUpdate"),
+      );
+      expect(writes.map((c) => c.body)).toEqual([
+        {
+          valueInputOption: "USER_ENTERED",
+          data: [{ range: "'Tasks (old)'!A5", values: [["'Done"]] }],
+        },
+      ]);
+    });
+
+    it("never adds the Knit columns where another tab's layout says they go", async () => {
+      const { source, calls, swap } = swappedTabs();
+      // The titles change right after the fresh listing the Knit columns are placed from.
+      const listTabs = source.listTabs.bind(source);
+      source.listTabs = async (fileId: string) => {
+        const tabs = await listTabs(fileId);
+        swap();
+        return tabs;
+      };
+      await expect(source.ensureKnitColumns(ref, 1)).rejects.toThrow(
+        /names another tab/,
+      );
+      expect(calls.filter((c) => c.method === "POST")).toEqual([]);
+    });
+
+    it("reads one column, and the top rows, of the tab by sheetId", async () => {
+      const column = swappedTabs();
+      await column.source.readStructure(ref, 1);
+      column.swap();
+      expect(await column.source.readColumn(ref, 1, "Status")).toEqual([
+        { row: 2, value: "the tracker" },
+      ]);
+      const top = swappedTabs();
+      await top.source.readStructure(ref, 1);
+      top.swap();
+      expect(await top.source.readTopRows(ref, 2)).toEqual([
+        ["Status"],
+        ["the tracker"],
+      ]);
+    });
   });
 
   it("reads the structure of the tab by sheetId even when another tab took its old title", async () => {

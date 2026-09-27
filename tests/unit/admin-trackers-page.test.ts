@@ -11,8 +11,6 @@ const data = vi.hoisted(() => ({ value: null as unknown }));
 
 vi.mock("@/lib/admin/data", () => ({
   loadAdminTrackers: async () => data.value,
-  pausedForMissingKnitIds: (reason: string | null) =>
-    (reason ?? "").toLowerCase().includes("knit id"),
 }));
 vi.mock("@/lib/actions/admin", () => ({
   pauseTracker: vi.fn(),
@@ -84,6 +82,26 @@ describe("Admin > Trackers", () => {
     });
     expect(html.match(/Resume/g)).toHaveLength(1);
     expect(html).toContain("Recreate Knit IDs");
+  });
+
+  it("offers Resume, never the recreate flow, for a doubled Knit ID column or formulas in it (N39, N43, review R6)", async () => {
+    const html = await render({
+      trackers: [
+        tracker({
+          state: "paused",
+          pauseReason: "column 'Knit ID' holds formulas and cannot be written",
+        }),
+        tracker({
+          id: "00000000-0000-4000-8000-000000000004",
+          state: "paused",
+          pauseReason: "column 'Knit ID' appears more than once",
+          fileId: "sheet-3",
+        }),
+      ],
+      files: [],
+    });
+    expect(html.match(/Resume/g)).toHaveLength(2);
+    expect(html).not.toContain("Recreate Knit IDs");
   });
 
   it("says how to turn a file that is not a Google Sheet into one (7.4)", async () => {

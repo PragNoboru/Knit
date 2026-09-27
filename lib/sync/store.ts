@@ -38,6 +38,18 @@ export interface SyncContext {
 export type ApplyResult =
   { result: "applied"; stats: PullPlan["stats"] } | { result: "retry" };
 
+/** What close_day returns (PRD 6.4, 19). */
+export interface CloseDayStats {
+  day: LocalDate;
+  next_working_day: LocalDate;
+  locked_as_is: number;
+  not_done: number;
+  blocked: number;
+  spillovers: number;
+  early_completions_locked: number;
+  task_ids: string[];
+}
+
 export interface SyncStore {
   today(): Promise<LocalDate>;
   loadContext(): Promise<SyncContext>;
@@ -82,6 +94,20 @@ export interface SyncStore {
     error: string | null,
     statusRaw?: string | null,
   ): Promise<void>;
+  /** PRD 10.5: the close-days job. */
+  nextDayToClose(): Promise<LocalDate | null>;
+  beginDayClosure(day: LocalDate): Promise<void>;
+  finishDayClosure(
+    day: LocalDate,
+    stats: Record<string, unknown>,
+  ): Promise<void>;
+  failDayClosure(day: LocalDate, error: string): Promise<void>;
+  closeDay(day: LocalDate): Promise<CloseDayStats>;
+  enqueueNoteRefresh(taskIds: string[]): Promise<number>;
+  archiveRows(
+    day: LocalDate,
+  ): Promise<{ taskDays: unknown[][]; events: unknown[][] }>;
+  outboxDueCount(): Promise<number>;
   /** PRD 7.3: the holder id, or null when another call holds the job's lease. */
   acquireLease(job: string, ttlSeconds: number): Promise<string | null>;
   releaseLease(job: string, holder: string): Promise<boolean>;
@@ -189,6 +215,31 @@ export function createSyncStore(rpc: Rpc): SyncStore {
         p_status_raw: statusRaw,
       });
     },
+    nextDayToClose: async () => {
+      const day = await rpc("next_day_to_close", {});
+      return day === null || day === undefined ? null : String(day);
+    },
+    beginDayClosure: async (day) => {
+      await rpc("begin_day_closure", { p_day: day });
+    },
+    finishDayClosure: async (day, stats) => {
+      await rpc("finish_day_closure", { p_day: day, p_stats: stats });
+    },
+    failDayClosure: async (day, error) => {
+      await rpc("fail_day_closure", { p_day: day, p_error: error });
+    },
+    closeDay: async (day) =>
+      (await rpc("close_day", { p_day: day })) as CloseDayStats,
+    enqueueNoteRefresh: async (taskIds) =>
+      taskIds.length === 0
+        ? 0
+        : Number(await rpc("enqueue_note_refresh", { p_task_ids: taskIds })),
+    archiveRows: async (day) =>
+      (await rpc("archive_rows", { p_day: day })) as {
+        taskDays: unknown[][];
+        events: unknown[][];
+      },
+    outboxDueCount: async () => Number(await rpc("outbox_due_count", {})),
     acquireLease: async (job, ttlSeconds) => {
       const holder = await rpc("acquire_lease", {
         p_job: job,

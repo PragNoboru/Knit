@@ -1,8 +1,12 @@
-import { JWT } from "google-auth-library";
-
 import { normaliseKey } from "@/lib/domain/config";
 import type { CellValue } from "@/lib/domain/dates";
 import type { SheetRow } from "@/lib/domain/rows";
+
+import {
+  createGoogleApi,
+  type GoogleApi,
+  type GoogleApiOptions,
+} from "./google-api";
 
 import {
   columnLetter,
@@ -26,26 +30,13 @@ import {
  * a tab breaks nothing.
  */
 
-export const GOOGLE_SCOPES = [
-  "https://www.googleapis.com/auth/spreadsheets",
-  "https://www.googleapis.com/auth/drive.readonly",
-];
-
 const SHEETS = "https://sheets.googleapis.com/v4/spreadsheets";
 const DRIVE = "https://www.googleapis.com/drive/v3/files";
 /** Data rows sampled for formula and dropdown detection (7.4: "a sample of data rows"). */
 const STRUCTURE_SAMPLE_ROWS = 300;
-const RETRYABLE = new Set([429, 500, 502, 503, 504]);
 
-export interface GoogleSheetOptions {
+export interface GoogleSheetOptions extends GoogleApiOptions {
   folderId: string;
-  /** The service account key (validated by lib/env.ts). */
-  credentials?: { client_email: string; private_key: string };
-  /** Replaces the service-account token, for tests. */
-  getToken?: () => Promise<string>;
-  fetch?: typeof fetch;
-  sleep?: (ms: number) => Promise<void>;
-  maxAttempts?: number;
 }
 
 type Json = Record<string, unknown>;
@@ -67,78 +58,17 @@ function cellText(value: unknown): string {
 }
 
 export class GoogleSheetSource implements SheetSource {
-  private readonly fetchImpl: typeof fetch;
-  private readonly sleep: (ms: number) => Promise<void>;
-  private readonly getToken: () => Promise<string>;
+  private readonly api: GoogleApi;
 
   constructor(private readonly options: GoogleSheetOptions) {
-    this.fetchImpl = options.fetch ?? fetch;
-    this.sleep =
-      options.sleep ??
-      ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
-    if (options.getToken) {
-      this.getToken = options.getToken;
-    } else {
-      if (!options.credentials)
-        throw new Error("GoogleSheetSource needs credentials");
-      const jwt = new JWT({
-        email: options.credentials.client_email,
-        key: options.credentials.private_key,
-        scopes: GOOGLE_SCOPES,
-      });
-      this.getToken = async () => {
-        const { token } = await jwt.getAccessToken();
-        if (!token)
-          throw new SheetError("Google returned no access token", "api_error");
-        return token;
-      };
-    }
+    this.api = createGoogleApi(options);
   }
 
-  // ---- HTTP ----------------------------------------------------------------------------------
-
-  private async request<T>(
+  private request<T>(
     url: string,
     init: { method?: string; body?: unknown } = {},
   ): Promise<T> {
-    const attempts = this.options.maxAttempts ?? 5;
-    for (let attempt = 1; ; attempt += 1) {
-      const response = await this.fetchImpl(url, {
-        method: init.method ?? "GET",
-        headers: {
-          authorization: `Bearer ${await this.getToken()}`,
-          ...(init.body === undefined
-            ? {}
-            : { "content-type": "application/json" }),
-        },
-        body: init.body === undefined ? undefined : JSON.stringify(init.body),
-      });
-      if (response.ok) return (await response.json()) as T;
-      if (response.status === 404) {
-        throw new SheetError(
-          `Not found: ${new URL(url).pathname}`,
-          "file_not_found",
-        );
-      }
-      if (!RETRYABLE.has(response.status) || attempt >= attempts) {
-        // Never log or return sheet content: only the status and Google's error reason.
-        let reason = "";
-        try {
-          const body = (await response.json()) as {
-            error?: { status?: string; message?: string };
-          };
-          reason = body.error?.status ?? "";
-        } catch {
-          reason = "";
-        }
-        throw new SheetError(
-          `Google API ${response.status} ${reason}`.trim(),
-          "api_error",
-        );
-      }
-      const backoff = 500 * 2 ** (attempt - 1);
-      await this.sleep(backoff + Math.floor(Math.random() * backoff));
-    }
+    return this.api.request<T>(url, init);
   }
 
   private async tabTitle(ref: TabRef): Promise<string> {

@@ -2,9 +2,14 @@ import "server-only";
 
 import { timingSafeEqual } from "node:crypto";
 
-import { getServerEnv } from "@/lib/env";
+import { getServerEnv, type ServerEnv } from "@/lib/env";
 import { sheetSourceFor } from "@/lib/sheets/factory";
 import { serviceRpc } from "@/lib/supabase/service";
+import {
+  GoogleArchive,
+  localArchive,
+  type ArchiveSink,
+} from "@/lib/sync/archive";
 import { errorSummary, logEvent } from "@/lib/sync/log";
 import { createSyncStore, type SyncStore } from "@/lib/sync/store";
 
@@ -30,7 +35,17 @@ export async function jobDeps() {
     env,
     store: createSyncStore(serviceRpc()),
     source: await sheetSourceFor(env),
+    archive: archiveFor(env),
   };
+}
+
+/** PRD 10.7: the Knit Archive sheet in production; a local file in local mode (N16). */
+function archiveFor(env: ServerEnv): ArchiveSink {
+  return env.KNIT_SHEET_SOURCE === "google"
+    ? new GoogleArchive(env.KNIT_ARCHIVE_SHEET_ID, {
+        credentials: env.GOOGLE_SERVICE_ACCOUNT_JSON,
+      })
+    : localArchive();
 }
 
 /** The deadline for a call's work: 80% of maxDuration (seconds) from now. */

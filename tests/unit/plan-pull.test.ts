@@ -611,4 +611,23 @@ describe("planPull: a row restored after its removal was closed (PRD 6.6, invari
       }),
     ]);
   });
+
+  it("comes back with a date Knit cannot read: both items are raised, each under its own key (N30, invariant 7)", () => {
+    const task = dbTask("a", {
+      dueDate: "2026-10-05",
+      plannedStart: "2026-10-05",
+      removedAtSource: true,
+      taskDays: [cancelled("2026-10-05")],
+    });
+    const p = plan([task], [row("a", { date: "TBD" })]);
+    // The restore is recorded now, so this is the only pull that can say the task has no day.
+    expect(p.taskUpdates[0]!.set).toMatchObject({ removedAtSource: null });
+    expect(p.taskDayInserts).toEqual([]);
+    expect(
+      p.attention.map((a) => [a.kind, a.dedupeKey, a.detail.reason]),
+    ).toEqual([
+      ["bad_date", "bad_date:a", "unparseable"],
+      ["bad_date", "bad_date:restored:a", "restored_after_close"],
+    ]);
+  });
 });

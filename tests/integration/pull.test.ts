@@ -421,6 +421,48 @@ describe("pull (PRD 10.2)", () => {
     ]);
   });
 
+  it("a row restored after its removal was closed is reported even while another date item of its task is open (N30, invariant 7)", async () => {
+    await pull();
+    const [task] = await db().query<{ id: string; ref: string; due: string }>(
+      `select id::text, source_ref as ref, due_date::text as due from tasks
+       where due_date > '2026-09-30' and date_kind = 'single' order by due_date limit 1`,
+    );
+    const tab = file.tabs[0]!;
+    const index = tab.rows.findIndex((cells) =>
+      cells.some((c) => c.formatted === task!.ref),
+    );
+    const saved = tab.rows[index]!.map((cell) => ({ ...cell }));
+
+    // The row is deleted on 28 Sep; the close of 28 Sep freezes its cancelled task-day.
+    await source.deleteRow(ctx.ref, index + 1);
+    await pull();
+    await setToday(db(), "2026-09-29");
+    await storeFor(db()).closeDay(TODAY);
+    // Another date item of the task is still open (a clash raised earlier).
+    await db().query(
+      `insert into attention_items (tracker_id, task_id, kind, dedupe_key, detail)
+       values ($1, $2::uuid, 'bad_date', $3, '{"reason": "day_already_used"}')`,
+      [ctx.trackerId, task!.id, `bad_date:${task!.id}`],
+    );
+
+    // The row comes back.
+    await source.insertRow(ctx.ref, index + 1, saved);
+    await pull();
+    expect(
+      await db().query(
+        `select detail ->> 'reason' as reason from attention_items
+         where task_id = $1 and state = 'open' order by id`,
+        [task!.id],
+      ),
+    ).toEqual([
+      { reason: "day_already_used" },
+      { reason: "restored_after_close" },
+    ]);
+    expect(
+      (await taskDays(db(), task!.id)).map((d) => [d.day, d.status, d.locked]),
+    ).toEqual([[task!.due, "cancelled", true]]);
+  });
+
   it("apply_pull_plan answers retry on a stale state_version and applies nothing (17)", async () => {
     const store = storeFor(db());
     const plan = {

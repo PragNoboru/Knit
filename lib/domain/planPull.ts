@@ -672,6 +672,9 @@ class Planner {
     // the close that locked the task-days its removal cancelled (6.6): it is placed like any
     // task without one, and when that day's task-day is already closed nothing is placed and
     // the admin is told (invariant 7), instead of the task silently vanishing from every list.
+    // That item has its own key: it must never be merged with another bad_date item of the
+    // task (the row's date unreadable, a date clash), in this plan or still open (N30), since
+    // the restore is recorded now and no later pull raises it again.
     if (
       !isFinal(status) &&
       s.newDue !== null &&
@@ -680,7 +683,7 @@ class Planner {
       if (task.removedAtSource) {
         const day = s.newDue >= this.today ? s.newDue : this.today;
         if (task.taskDays.some((d) => d.day === day && d.locked)) {
-          this.attention("bad_date", task.id, task.id, {
+          this.attention("bad_date", `restored:${task.id}`, task.id, {
             reason: "restored_after_close",
             day,
             row: row.rowNumber,

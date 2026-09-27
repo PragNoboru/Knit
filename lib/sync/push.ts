@@ -24,7 +24,7 @@ import {
 } from "@/lib/sheets/types";
 import { formatDate, fromSheetsSerial, type LocalDate } from "@/lib/time";
 
-import { knitIdOf, rowsByKnitId } from "./identity";
+import { knitIdOf, rowsByKnitId, rowsWithContent } from "./identity";
 import { errorSummary, logEvent } from "./log";
 import type { SyncStore } from "./store";
 import { checkStructure } from "./structure";
@@ -34,7 +34,9 @@ import { checkStructure } from "./structure";
  *   1. Claim due write-backs (newest per task; paused trackers held).
  *   2. Per tracker: read the rows and find each task's row by its Knit ID at write time. A
  *      Knit ID found on two rows (a pasted copy, 14) is not guessed at: nothing is written and
- *      the write-back is retried after the next pull has given the lower row a new ID.
+ *      the write-back is retried, never failed for good (N22), after the next pull has given
+ *      the lower row a new ID. Rows empty in every mapped column do not count, as for the pull
+ *      (10.2 step 3), so a Knit ID left on a cleared row never blocks the write.
  *   3. Never write to a formula or read-only column (N6).
  *   4. Status word (unless the tracker cannot express it, N8), completed-on cell (value on done,
  *      cleared on a revert from the Done the sheet shows) and the Knit Note, in one batch.
@@ -161,17 +163,27 @@ function holds(row: SheetRow, cell: CellWrite, today: LocalDate): boolean {
  * re-read from the sheet, and nothing it did not write (a note-only write-back, or a status the
  * tracker cannot express, N8, leaves the other values as the last pull saw them). Null when it
  * wrote neither cell. push_result merges it into the task's snapshot.
+ *
+ * The status word is read from the status-read column (as the pull reads it). It is Knit's own
+ * write only when that column is the status-write column, or a formula column (N6) computed
+ * from it, like Noboru's Status (6.8). Any other status-read column is a cell Knit did not
+ * write: its last pulled word stays, so a word a person typed there is still seen by the next
+ * pull (N23). `formulaColumns` are the tab's normalised formula headers (TabStructure).
  */
 export function writtenSnapshot(
   row: SheetRow,
   cells: readonly CellWrite[],
   config: TrackerConfig,
   today: LocalDate,
+  formulaColumns: readonly string[] = [],
 ): Partial<SourceSnapshot> | null {
   const wrote = (header: string | null) =>
     cells.some((cell) => sameHeader(cell.header, header));
+  const readFollowsWrite =
+    sameHeader(config.columns.statusRead, config.columns.statusWrite) ||
+    formulaColumns.includes(normaliseKey(config.columns.statusRead));
   const snapshot: Partial<SourceSnapshot> = {};
-  if (wrote(config.columns.statusWrite)) {
+  if (wrote(config.columns.statusWrite) && readFollowsWrite) {
     const word = textOf(cellOf(row, config.columns.statusRead));
     snapshot.statusKey = normaliseKey(word);
     // With the word, the Knit status it maps to, as a pull would record it (10.3): the next
@@ -238,11 +250,12 @@ async function pushTracker(
   ) => {
     settled.add(item.outboxId);
     await store.pushResult(item.outboxId, ok, snapshot, error, statusRaw);
+    // As push_result decides: a pasted copy (duplicate_knit_id) always retries (N22).
     if (ok) stats.done += 1;
     else if (
       error === "row_not_found" ||
       error === "formula_column" ||
-      item.attempts + 1 >= 5
+      (error !== "duplicate_knit_id" && item.attempts + 1 >= 5)
     )
       stats.failed += 1;
     else stats.retried += 1;
@@ -277,11 +290,15 @@ async function pushTracker(
       writable.delete(blocked);
     }
     const before = await source.readRows(ref, config.headerRow);
+    // Every row with a Knit ID, for putting a stray write back (a cleared row included).
     const beforeById = rowsByKnitId(before);
+    // The task's row as the pull sees it (10.2 step 3): a Knit ID left on a row whose mapped
+    // cells were all cleared is not a second row of the task.
+    const holdersById = rowsByKnitId(rowsWithContent(before, config));
 
     const planned: { item: ClaimedWrite; cells: CellWrite[] }[] = [];
     for (const item of items) {
-      const holders = beforeById.get(item.task.id.toLowerCase()) ?? [];
+      const holders = holdersById.get(item.task.id.toLowerCase()) ?? [];
       if (holders.length === 0) {
         await settle(item, false, null, "row_not_found");
         continue;
@@ -330,7 +347,7 @@ async function pushTracker(
       );
       throw error;
     }
-    const afterById = rowsByKnitId(after);
+    const afterById = rowsByKnitId(rowsWithContent(after, config));
     const afterByNumber = new Map(after.map((row) => [row.rowNumber, row]));
 
     const repairs: CellWrite[] = [];
@@ -340,7 +357,13 @@ async function pushTracker(
       const holders = afterById.get(id) ?? [];
       const row = holders.length === 1 ? holders[0] : undefined;
       if (row && cells.every((cell) => holds(row, cell, today))) {
-        const snapshot = writtenSnapshot(row, cells, config, today);
+        const snapshot = writtenSnapshot(
+          row,
+          cells,
+          config,
+          today,
+          structure.formulaColumns,
+        );
         const statusRaw =
           snapshot?.statusKey !== undefined
             ? textOf(cellOf(row, config.columns.statusRead))

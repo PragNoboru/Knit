@@ -4,6 +4,7 @@ import type { SheetRow } from "@/lib/domain/rows";
 import { MemorySheetSource, type MemoryFile } from "@/lib/sheets/memory";
 import type { CellWrite, TabRef } from "@/lib/sheets/types";
 import { loadXlsxFile } from "@/lib/sheets/xlsx";
+import { mismatchCheck } from "@/lib/sync/close";
 import { pullTracker } from "@/lib/sync/pull";
 import { pushDue } from "@/lib/sync/push";
 import { toSheetsSerial } from "@/lib/time";
@@ -332,6 +333,114 @@ describe("push (PRD 10.4)", () => {
     );
     expect(await push()).toMatchObject({ done: 1 });
     expect(await doneRows()).toEqual([2]);
+    expect(await statusOf(g01)).toBe("done");
+  });
+
+  it("a pasted copy never fails for good: duplicate_knit_id keeps retrying with the normal backoff (N22, 10.4 step 5)", async () => {
+    const g01 = await taskId(db(), "G01");
+    const tab = file.tabs[0]!;
+    await source.insertRow(
+      ctx.ref,
+      tab.rows.length + 1,
+      tab.rows[1]!.map((cell) => ({ ...cell })),
+    );
+    await setStatus(g01, "done");
+    const [{ id }] = (await db().query<{ id: string }>(
+      "select id::text from outbox",
+    )) as [{ id: string }];
+    const store = storeFor(db());
+    const waits: number[] = [];
+    for (let i = 0; i < 6; i += 1) {
+      await store.pushResult(id, false, null, "duplicate_knit_id");
+      const [row] = await db().query<{ state: string; minutes: number }>(
+        "select state::text, round(extract(epoch from next_attempt_at - now()) / 60)::int as minutes from outbox where id = $1",
+        [id],
+      );
+      expect(row!.state).toBe("pending");
+      waits.push(row!.minutes);
+    }
+    expect(waits).toEqual([1, 2, 5, 15, 60, 60]);
+
+    // The push counts it as a retry, whatever the attempts so far.
+    await db().query(
+      "update outbox set next_attempt_at = now() where id = $1",
+      [id],
+    );
+    expect(await push()).toEqual({
+      claimed: 1,
+      done: 0,
+      retried: 1,
+      failed: 0,
+    });
+    expect(
+      await db().query("select state::text, attempts from outbox"),
+    ).toEqual([{ state: "pending", attempts: 7 }]);
+    expect(await db().query("select kind from attention_items")).toEqual([]);
+  });
+
+  it("a Knit ID left on a row whose cells were cleared does not block the write, nor the mismatch check (10.2 step 3, N22)", async () => {
+    const g01 = await taskId(db(), "G01");
+    const tab = file.tabs[0]!;
+    // Someone copies G01's whole row (hidden Knit ID included) to the top, then clears the
+    // visible cells of the old row, now row 3. Its Knit ID stays.
+    await source.insertRow(
+      ctx.ref,
+      2,
+      tab.rows[1]!.map((cell) => ({ ...cell })),
+    );
+    const idColumn = source
+      .headers(tab, 1)
+      .find((h) => h.normalised === "knit id")!.index;
+    tab.rows[2] = tab.rows[2]!.map((cell, index) =>
+      index === idColumn ? cell : { value: null, formatted: "" },
+    );
+    await pull();
+    expect(
+      await db().query(
+        "select kind from attention_items where kind = 'duplicate_knit_id'",
+      ),
+    ).toEqual([]);
+
+    // The nightly check reads G01's own row, not the cleared one below it.
+    const store = storeFor(db());
+    expect(
+      await mismatchCheck({ store, source }, await store.trackers()),
+    ).toMatchObject({ mismatches: 0 });
+
+    await setStatus(g01, "done");
+    expect(await push()).toMatchObject({ claimed: 1, done: 1 });
+    expect(await sheetRow(source, ctx.ref, g01)).toMatchObject({
+      status: "Done",
+    });
+    expect(
+      (await source.readRows(ctx.ref, 1))
+        .filter((r) => r.cells.status?.formatted === "Done")
+        .map((r) => r.rowNumber),
+    ).toEqual([2]);
+  });
+
+  it("a status-read column Knit does not write keeps its last pulled word, so a person's change there reaches the next pull (N23)", async () => {
+    const config = fixtureTrackerConfig(FILING_BUDDY_GOOGLE_ADS) as {
+      columns: Record<string, unknown>;
+    };
+    // Status is read from "Status" and written to "Notes": two different columns.
+    await restart({ columns: { ...config.columns, statusWrite: "Notes" } });
+    const g01 = await taskId(db(), "G01");
+    // Someone marks G01 done in the sheet; before the next pull, Knit sets it In progress.
+    await source.setCell(ctx.ref, 1, 2, "Status", "Done");
+    await setStatus(g01, "in_progress");
+    expect(await push()).toMatchObject({ done: 1 });
+    const [task] = await db().query<{ source_snapshot: unknown }>(
+      "select source_snapshot from tasks where id = $1",
+      [g01],
+    );
+    expect(task!.source_snapshot).toEqual({
+      statusKey: "not started",
+      completedOn: null,
+      status: "yet_to_start",
+    });
+    // The sheet's Done is a change in a cell Knit did not write: the next pull applies it.
+    await pull();
     expect(await statusOf(g01)).toBe("done");
   });
 

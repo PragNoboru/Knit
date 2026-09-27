@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import { normaliseKey, type TrackerConfig } from "@/lib/domain/config";
-import { cellOf, textOf, type SheetRow } from "@/lib/domain/rows";
+import { cellOf, isEmptyRow, textOf, type SheetRow } from "@/lib/domain/rows";
 import {
   KNIT_ID_HEADER,
   KNIT_NOTE_HEADER,
@@ -57,6 +57,19 @@ export const knitIdOf = (row: SheetRow): string =>
   textOf(cellOf(row, KNIT_ID_HEADER)).toLowerCase();
 
 const validId = (id: string) => UUID.test(id);
+
+/**
+ * 10.2 step 3: the rows Knit counts. A row empty in every mapped column is ignored, even when
+ * its hidden Knit ID is still there (a row copied elsewhere, then cleared). The pull, the push
+ * and the mismatch check all read the sheet through this, so a Knit ID left on such a row is
+ * never a second row of its task for one of them while the others do not see it.
+ */
+export function rowsWithContent(
+  rows: readonly SheetRow[],
+  config: TrackerConfig,
+): SheetRow[] {
+  return rows.filter((row) => !isEmptyRow(row, config));
+}
 
 /**
  * Rows by Knit ID (lower-cased), in sheet order. An ID found on more than one row maps to all

@@ -1,10 +1,11 @@
 import { normaliseKey } from "@/lib/domain/config";
 import { cellOf, textOf } from "@/lib/domain/rows";
 import { mapSourceStatus, writeBackFor } from "@/lib/domain/status";
-import { KNIT_ID_HEADER, type SheetSource } from "@/lib/sheets/types";
+import type { SheetSource } from "@/lib/sheets/types";
 import type { LocalDate } from "@/lib/time";
 
 import type { ArchiveSink } from "./archive";
+import { rowsByKnitId, rowsWithContent } from "./identity";
 import { withLease, type LeaseOptions } from "./leases";
 import { errorSummary, logEvent } from "./log";
 import { pullTracker } from "./pull";
@@ -68,15 +69,16 @@ export async function mismatchCheck(
     const { config } = tracker;
     const statusCell = config.columns.statusWrite;
     if (!statusCell) continue;
-    const rows = await deps.source.readRows(
-      { fileId: tracker.fileId, sheetId: tracker.sheetGid },
-      config.headerRow,
-    );
-    const byId = new Map(
-      rows.map((row) => [
-        textOf(cellOf(row, KNIT_ID_HEADER)).toLowerCase(),
-        row,
-      ]),
+    // The rows as the pull sees them (10.2 steps 3 and 4): rows empty in every mapped column
+    // are ignored, and a Knit ID on two rows belongs to the upper one.
+    const byId = rowsByKnitId(
+      rowsWithContent(
+        await deps.source.readRows(
+          { fileId: tracker.fileId, sheetId: tracker.sheetGid },
+          config.headerRow,
+        ),
+        config,
+      ),
     );
     // statusMap reads the status-read column's words; they only apply to the cell Knit writes
     // when both are the same column.
@@ -86,7 +88,7 @@ export async function mismatchCheck(
     for (const task of tasks) {
       if (task.removedAtSource) continue;
       const expected = writeBackFor(task.status, config);
-      const row = byId.get(task.id.toLowerCase());
+      const row = byId.get(task.id.toLowerCase())?.[0];
       if (expected === null || !row) continue;
       checked += 1;
       const actual = textOf(cellOf(row, statusCell));

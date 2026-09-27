@@ -288,6 +288,41 @@ describe("refresh_calendar and holidays (PRD 6.2, 9.1, 9.2)", () => {
     expect(Number(after!.v)).toBe(Number(before!.v) + 1);
   });
 
+  it("saves a holiday on the calendar's last working day when nothing has to move off it (12.8, N37)", async () => {
+    const admin = await createUser(db(), { role: "admin" });
+    await setToday(db(), "2026-09-28");
+    // Fri 31 Dec 2027: the calendar's last day, with no working day after it.
+    await queryAs(
+      db(),
+      { kind: "user", id: admin },
+      "insert into holidays (day, name) values ('2027-12-31', 'New Year Eve')",
+    );
+    const [day] = await db().query(
+      "select is_working, reason from calendar_days where day = '2027-12-31'",
+    );
+    expect(day).toEqual({ is_working: false, reason: "New Year Eve" });
+  });
+
+  it("refuses that holiday while an open spillover sits on it: Knit does not guess where it goes (invariant 7)", async () => {
+    const admin = await createUser(db(), { role: "admin" });
+    const trackerId = await createTracker(db());
+    await setToday(db(), "2026-09-28");
+    const taskId = await createTask(db(), { trackerId, dueDate: "2027-12-30" });
+    await createTaskDay(db(), {
+      taskId,
+      day: "2027-12-31",
+      spillIndex: 1,
+      origin: "spillover",
+    });
+    await expect(
+      queryAs(
+        db(),
+        { kind: "user", id: admin },
+        "insert into holidays (day, name) values ('2027-12-31', 'New Year Eve')",
+      ),
+    ).rejects.toMatchObject({ message: "calendar_not_covered" });
+  });
+
   it("does not let members edit holidays", async () => {
     const member = await createUser(db(), { role: "member" });
     await expect(

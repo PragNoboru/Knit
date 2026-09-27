@@ -165,44 +165,102 @@ function resolve(
   return { ok: true, date };
 }
 
-/** One date in any single form of PRD 6.3.2 step 4. Numeric forms are always day-first. */
-function parseSingle(text: string, today: LocalDate): SingleResult {
+/** What one date's text says, before a missing year is inferred. */
+interface DateParts {
+  day: number;
+  month: number;
+  year: number | null;
+  weekday: number | null;
+}
+
+/**
+ * The parts of one date in any single form of PRD 6.3.2 step 4, or null when the text is not
+ * one. Numeric forms are always day-first and always carry their year.
+ */
+function partsOf(text: string): DateParts | null {
   let match = NUMERIC_YMD.exec(text);
-  if (match) return resolve(+match[3]!, +match[2]!, +match[1]!, null, today);
+  if (match)
+    return {
+      day: +match[3]!,
+      month: +match[2]!,
+      year: +match[1]!,
+      weekday: null,
+    };
 
   match = NUMERIC_DMY.exec(text) ?? NUMERIC_DMY_DASH.exec(text);
   if (match) {
     const rawYear = match[3]!;
     const year =
       rawYear.length === 2 ? 2000 + Number(rawYear) : Number(rawYear);
-    return resolve(+match[1]!, +match[2]!, year, null, today);
+    return { day: +match[1]!, month: +match[2]!, year, weekday: null };
   }
 
   match = DAY_MONTH.exec(text);
   if (match) {
     const [, weekday, day, month, year] = match;
-    return resolve(
-      +day!,
-      MONTH_INDEX[month!]!,
-      year ? +year : null,
-      weekday ? WEEKDAY_INDEX[weekday]! : null,
-      today,
-    );
+    return {
+      day: +day!,
+      month: MONTH_INDEX[month!]!,
+      year: year ? +year : null,
+      weekday: weekday ? WEEKDAY_INDEX[weekday]! : null,
+    };
   }
 
   match = MONTH_DAY.exec(text);
   if (match) {
     const [, weekday, month, day, year] = match;
-    return resolve(
-      +day!,
-      MONTH_INDEX[month!]!,
-      year ? +year : null,
-      weekday ? WEEKDAY_INDEX[weekday]! : null,
-      today,
-    );
+    return {
+      day: +day!,
+      month: MONTH_INDEX[month!]!,
+      year: year ? +year : null,
+      weekday: weekday ? WEEKDAY_INDEX[weekday]! : null,
+    };
   }
 
-  return { ok: false, reason: "unparseable" };
+  return null;
+}
+
+/** Resolves parts to a date; a missing year is inferred around `reference` (step 5). */
+function resolveParts(
+  parts: DateParts | null,
+  reference: LocalDate,
+): SingleResult {
+  if (!parts) return { ok: false, reason: "unparseable" };
+  return resolve(parts.day, parts.month, parts.year, parts.weekday, reference);
+}
+
+/** One date in any single form of PRD 6.3.2 step 4. Numeric forms are always day-first. */
+function parseSingle(text: string, today: LocalDate): SingleResult {
+  return resolveParts(partsOf(text), today);
+}
+
+/**
+ * PRD 6.3.2 step 6: the two ends of a window ("28 Sep - 2 Oct"). Both follow the rules of a
+ * single date, but a side without a year takes its year around the other end instead of
+ * around today, so the ends of one window never land in different years just because today
+ * is near the 183-day edge of step 5. The side that says more is resolved first: the one with
+ * a year, else the only one with a weekday, else the end. With a year on both sides, each
+ * stands alone.
+ */
+function windowEnds(
+  startText: string,
+  endText: string,
+  today: LocalDate,
+): [SingleResult, SingleResult] {
+  const start = partsOf(startText);
+  const end = partsOf(endText);
+  if (!start || !end || (start.year !== null && end.year !== null)) {
+    return [resolveParts(start, today), resolveParts(end, today)];
+  }
+  const startFirst =
+    start.year !== null ||
+    (end.year === null && start.weekday !== null && end.weekday === null);
+  if (startFirst) {
+    const first = resolveParts(start, today);
+    return [first, resolveParts(end, first.ok ? first.date : today)];
+  }
+  const first = resolveParts(end, today);
+  return [resolveParts(start, first.ok ? first.date : today), first];
 }
 
 function toWindow(start: SingleResult, end: SingleResult): ParsedDate {
@@ -227,18 +285,23 @@ export function parseDateText(text: string, today: LocalDate): ParsedDate {
 
   const sameMonth = DAY_RANGE_SAME_MONTH.exec(text);
   if (sameMonth) {
-    const [, startDay, endDay, month, year] = sameMonth;
-    const suffix = ` ${month}${year ? ` ${year}` : ""}`;
+    // Step 6: the end's month, and the year the end resolves to, apply to the start.
+    const [, startDay, endDay, monthName, year] = sameMonth;
+    const month = MONTH_INDEX[monthName!]!;
+    const end = resolve(+endDay!, month, year ? +year : null, null, today);
+    if (!end.ok) return { kind: "invalid", reason: end.reason };
+    const startDate = makeDate(yearOf(end.date), month, +startDay!);
     return toWindow(
-      parseSingle(`${startDay}${suffix}`, today),
-      parseSingle(`${endDay}${suffix}`, today),
+      startDate
+        ? { ok: true, date: startDate }
+        : { ok: false, reason: "not_a_date" },
+      end,
     );
   }
 
   const range = SPACED_RANGE.exec(text) ?? TIGHT_RANGE.exec(text);
   if (range) {
-    const start = parseSingle(range[1]!, today);
-    const end = parseSingle(range[2]!, today);
+    const [start, end] = windowEnds(range[1]!, range[2]!, today);
     // Only a window when both sides are dates; otherwise fall through to a single date.
     if (start.ok || end.ok) return toWindow(start, end);
   }

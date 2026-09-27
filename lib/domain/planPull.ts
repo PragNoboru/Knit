@@ -428,26 +428,17 @@ class Planner {
     // Dates (6.6): a bad date keeps the last good dates and is reported.
     const dates = this.usableDates(row);
     if (!dates) this.badDate(row, task.id);
-    const newDue = dates ? dates.dueDate : task.dueDate;
-    const dueChanged = dates !== null && dates.dueDate !== task.dueDate;
-    if (dates) {
-      for (const key of [
-        "dateKind",
-        "plannedStart",
-        "plannedEnd",
-        "dueDate",
-      ] as const) {
-        if (task[key] !== dates[key])
-          (set as Record<string, unknown>)[key] = dates[key];
-      }
-    }
     const openEnded = (dates ? dates.dateKind : task.dateKind) === "open";
 
-    // 10.3: three-way merge of the status and completed-on values.
+    // 10.3: three-way merge of the status and completed-on values. The source changed when the
+    // word or Completed On differs from the snapshot, or when the word now maps to another
+    // Knit status than when it was read (the admin mapped or remapped it, N19 d).
     const snapshot = task.sourceSnapshot;
     const sourceChanged = snapshot
       ? row.snapshot.statusKey !== snapshot.statusKey ||
-        row.snapshot.completedOn !== snapshot.completedOn
+        row.snapshot.completedOn !== snapshot.completedOn ||
+        (snapshot.status !== undefined &&
+          snapshot.status !== row.snapshot.status)
       : row.status.status !== task.status;
     const openDays = task.taskDays.filter((d) => !d.locked);
     const current =
@@ -514,11 +505,35 @@ class Planner {
       sourceSynced = true;
     }
 
+    // 6.6: a moved planned date moves the open task-day, but never one still waiting for its
+    // day's close (between midnight and the close, 10.5). The new dates are then left for the
+    // first pull after the close, which still sees them as moved and moves the spillover the
+    // close created (6.4). Saving them now would lose the move for good.
+    const dueChanged = dates !== null && dates.dueDate !== task.dueDate;
+    const waitingForClose =
+      dueChanged &&
+      current !== null &&
+      current.day < this.today &&
+      !isFinal(status) &&
+      !openEnded;
+    if (dates && !waitingForClose) {
+      for (const key of [
+        "dateKind",
+        "plannedStart",
+        "plannedEnd",
+        "dueDate",
+      ] as const) {
+        if (task[key] !== dates[key])
+          (set as Record<string, unknown>)[key] = dates[key];
+      }
+    }
+    const newDue = dates && !waitingForClose ? dates.dueDate : task.dueDate;
+
     this.taskDays(task, row, {
       set,
       status,
       applied,
-      dueChanged,
+      dueChanged: dueChanged && !waitingForClose,
       newDue,
       openEnded,
       current,
@@ -610,38 +625,42 @@ class Planner {
         Object.assign(update, { status, reason, statusChangedOn: this.today });
       }
       // 6.6: a moved planned date moves the open task-day (never one waiting for its close).
+      // Moved into the past, the task-day belongs on today as a spillover with past_date_added,
+      // also when it already sits on today.
       if (
         s.dueChanged &&
         s.newDue !== null &&
         !isFinal(status) &&
         current.day >= this.today
       ) {
-        const target = s.newDue >= this.today ? s.newDue : this.today;
-        if (target !== current.day) {
-          const clash = task.taskDays.find((d) => d.day === target);
-          if (clash) {
-            this.attention("bad_date", task.id, task.id, {
-              reason: "day_already_used",
-              day: target,
+        const past = s.newDue < this.today;
+        const target = past ? this.today : s.newDue;
+        const clash =
+          target === current.day
+            ? undefined
+            : task.taskDays.find((d) => d.day === target);
+        if (clash) {
+          this.attention("bad_date", task.id, task.id, {
+            reason: "day_already_used",
+            day: target,
+          });
+        } else if (target !== current.day || past) {
+          if (target !== current.day) update.day = target;
+          if (past) {
+            if (current.spillIndex < 1) update.spillIndex = 1;
+            if (current.origin !== "spillover") update.origin = "spillover";
+            this.attention("past_date_added", task.id, task.id, {
+              dueDate: s.newDue,
             });
-          } else {
-            update.day = target;
-            if (s.newDue < this.today) {
-              update.spillIndex = Math.max(1, current.spillIndex);
-              update.origin = "spillover";
-              this.attention("past_date_added", task.id, task.id, {
-                dueDate: s.newDue,
-              });
-            }
-            this.event(
-              task.id,
-              current.id,
-              "due_date",
-              task.dueDate,
-              s.newDue,
-              null,
-            );
           }
+          this.event(
+            task.id,
+            current.id,
+            "due_date",
+            task.dueDate,
+            s.newDue,
+            null,
+          );
         }
       }
       if (Object.keys(update).length > 0)
@@ -649,8 +668,27 @@ class Planner {
       return;
     }
 
-    // No open task-day: a task that is still open needs one.
-    if (!isFinal(status) && s.newDue !== null && (applied || s.dueChanged)) {
+    // No open task-day: a task that is still open needs one. That includes a row restored after
+    // the close that locked the task-days its removal cancelled (6.6): it is placed like any
+    // task without one, and when that day's task-day is already closed nothing is placed and
+    // the admin is told (invariant 7), instead of the task silently vanishing from every list.
+    if (
+      !isFinal(status) &&
+      s.newDue !== null &&
+      (applied || s.dueChanged || task.removedAtSource)
+    ) {
+      if (task.removedAtSource) {
+        const day = s.newDue >= this.today ? s.newDue : this.today;
+        if (task.taskDays.some((d) => d.day === day && d.locked)) {
+          this.attention("bad_date", task.id, task.id, {
+            reason: "restored_after_close",
+            day,
+            row: row.rowNumber,
+            value: row.plannedRaw,
+          });
+          return;
+        }
+      }
       const spillFloor = task.taskDays.reduce(
         (max, d) => Math.max(max, d.spillIndex),
         0,

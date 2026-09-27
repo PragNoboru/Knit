@@ -257,4 +257,35 @@ describe("renderKnitNote (PRD 6.9): every row of the table", () => {
       true,
     );
   });
+
+  it("counts the spills before the day it was done, not the task-days a correction cancelled (6.10)", () => {
+    // G21 missed Wed 30 Sep and Thu 1 Oct; the admin corrects a day to Done, which cancels
+    // every later task-day (spill_index kept) and sets Completed On to the corrected day.
+    const chain = (doneOn: string): NoteTaskDay[] =>
+      [
+        day("2026-09-30", 0, true),
+        day("2026-10-01", 1, true),
+        day("2026-10-03", 2, true),
+      ].map((d) =>
+        d.day === doneOn
+          ? { ...d, status: "done" }
+          : d.day > doneOn
+            ? { ...d, status: "cancelled" }
+            : d,
+      );
+    expect(
+      renderKnitNote(
+        task({ status: "done", completedOn: "2026-09-30" }),
+        chain("2026-09-30"),
+        TODAY,
+      ),
+    ).toBe("Done on Wed 30 Sep");
+    expect(
+      renderKnitNote(
+        task({ status: "done", completedOn: "2026-10-01" }),
+        chain("2026-10-01"),
+        TODAY,
+      ),
+    ).toBe("Done on Thu 1 Oct · after 1 spill");
+  });
 });

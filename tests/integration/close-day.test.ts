@@ -257,7 +257,7 @@ describe("close_day (PRD 6.4, 9.1, D10)", () => {
     });
     await setStatusAs(db(), member, b.taskId, "done", "2026-09-30");
 
-    await closeDay(db(), "2026-09-30", "2026-10-01");
+    const result = await closeDay(db(), "2026-09-30", "2026-10-01");
     const snapshot = () =>
       db().query(
         `select task_id::text, day::text, status::text, carried_status::text, spill_index, origin,
@@ -265,18 +265,91 @@ describe("close_day (PRD 6.4, 9.1, D10)", () => {
          from task_days where task_id in ($1, $2) order by task_id, day`,
         [a.taskId, b.taskId],
       );
+    const counts = () =>
+      db().query(
+        `select (select count(*)::int from events) as events,
+                (select count(*)::int from outbox) as outbox`,
+      );
     const first = await snapshot();
+    const firstCounts = await counts();
 
+    // The second call changes nothing and returns what closing the day did (19).
     const second = await closeDay(db(), "2026-09-30", "2026-10-01");
+    expect(second).toEqual(result);
     expect(second).toMatchObject({
-      locked_as_is: 0,
-      not_done: 0,
-      blocked: 0,
-      spillovers: 0,
-      early_completions_locked: 0,
-      task_ids: [],
+      locked_as_is: 1,
+      not_done: 1,
+      spillovers: 1,
+      // b's status write-back is still waiting, and it writes the note too (N17).
+      notes_queued: 1,
+      task_ids: [a.taskId, b.taskId].sort(),
     });
     expect(await snapshot()).toEqual(first);
+    expect(await counts()).toEqual(firstCounts);
+  });
+
+  it("writes a system event for each task-day it turns into Not Done, and none for Blocked (15)", async () => {
+    const open = await createPlannedTask(db(), {
+      trackerId,
+      assignees: [member],
+      day: "2026-09-30",
+    });
+    const started = await createPlannedTask(db(), {
+      trackerId,
+      assignees: [member],
+      day: "2026-09-30",
+    });
+    const blocked = await createPlannedTask(db(), {
+      trackerId,
+      assignees: [member],
+      day: "2026-09-30",
+    });
+    await setStatusAs(
+      db(),
+      member,
+      started.taskId,
+      "in_progress",
+      "2026-09-30",
+    );
+    await setStatusAs(
+      db(),
+      member,
+      blocked.taskId,
+      "blocked",
+      "2026-09-30",
+      "Waiting",
+    );
+    const systemEvents = () =>
+      db().query(
+        `select task_id::text, task_day_id::text, tracker_id::text, actor_user_id, field,
+                old_value, new_value
+         from events where origin = 'system' order by old_value`,
+      );
+
+    await closeDay(db(), "2026-09-30", "2026-10-01");
+    expect(await systemEvents()).toEqual([
+      {
+        task_id: started.taskId,
+        task_day_id: started.taskDayId,
+        tracker_id: trackerId,
+        actor_user_id: null,
+        field: "status",
+        old_value: "in_progress",
+        new_value: "not_done",
+      },
+      {
+        task_id: open.taskId,
+        task_day_id: open.taskDayId,
+        tracker_id: trackerId,
+        actor_user_id: null,
+        field: "status",
+        old_value: "yet_to_start",
+        new_value: "not_done",
+      },
+    ]);
+
+    await closeDay(db(), "2026-09-30", "2026-10-01");
+    expect(await systemEvents()).toHaveLength(2);
   });
 
   it("freezes early completions: a future task-day done on D locks when D closes (6.5)", async () => {
@@ -410,6 +483,69 @@ describe("close_day (PRD 6.4, 9.1, D10)", () => {
     ).rejects.toMatchObject({
       message: "close_day_out_of_order",
     });
+  });
+
+  it("the close job starts from a task-day earlier than every go-live, so later days can close (10.5, N12)", async () => {
+    // The only tracker goes live on Thu 1 Oct. On Mon 28 Sep the admin brings a backlog row to
+    // today (6.11), and an open-ended task is completed early on Tue 29 Sep for Mon 5 Oct.
+    await db().query("update trackers set go_live_date = '2026-10-01'");
+    const backlog = await createTask(db(), {
+      trackerId,
+      assignees: [member],
+      dueDate: "2026-09-21",
+    });
+    await createTaskDay(db(), {
+      taskId: backlog,
+      day: "2026-09-28",
+      spillIndex: 1,
+      origin: "backlog",
+    });
+    const early = await createPlannedTask(db(), {
+      trackerId,
+      assignees: [member],
+      day: "2026-10-05",
+    });
+    await setStatusAs(db(), member, early.taskId, "done", "2026-09-29");
+
+    const nextDay = async (today: string) => {
+      await setToday(db(), today);
+      const [row] = await queryAs<{ day: string | null }>(
+        db(),
+        SERVICE,
+        "select next_day_to_close()::text as day",
+      );
+      return row!.day;
+    };
+    expect(await nextDay("2026-09-29")).toBe("2026-09-28");
+
+    // On Fri 2 Oct the job closes every day from Mon 28 Sep, in order.
+    const closed: string[] = [];
+    for (let day = await nextDay("2026-10-02"); day;) {
+      await queryAs(db(), SERVICE, "select close_day($1)", [day]);
+      await queryAs(db(), SERVICE, "select finish_day_closure($1, '{}')", [
+        day,
+      ]);
+      closed.push(day);
+      day = await nextDay("2026-10-02");
+    }
+    expect(closed).toEqual([
+      "2026-09-28",
+      "2026-09-29",
+      "2026-09-30",
+      "2026-10-01",
+    ]);
+    expect(
+      (await taskDays(db(), backlog)).map((d) => [d.day, d.status, d.locked]),
+    ).toEqual([
+      ["2026-09-28", "not_done", true],
+      ["2026-09-29", "not_done", true],
+      ["2026-09-30", "not_done", true],
+      ["2026-10-01", "not_done", true],
+      ["2026-10-03", "yet_to_start", false],
+    ]);
+    expect(await taskDays(db(), early.taskId)).toMatchObject([
+      { day: "2026-10-05", status: "done", locked: true },
+    ]);
   });
 
   it("is refused to signed-in users, the admin included", async () => {

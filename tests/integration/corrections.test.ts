@@ -114,6 +114,21 @@ describe("admin_correct_task_day (PRD 6.10)", () => {
       [taskId],
     );
     expect(events).toEqual([
+      // The closes of Wed 30 Sep and Thu 1 Oct (PRD 15).
+      {
+        origin: "system",
+        old_value: "yet_to_start",
+        new_value: "not_done",
+        reason: null,
+        actor_user_id: null,
+      },
+      {
+        origin: "system",
+        old_value: "yet_to_start",
+        new_value: "not_done",
+        reason: null,
+        actor_user_id: null,
+      },
       {
         origin: "correction",
         old_value: "not_done",
@@ -138,10 +153,12 @@ describe("admin_correct_task_day (PRD 6.10)", () => {
     ]);
 
     const outbox = await db().query(
-      "select state::text, payload from outbox where task_id = $1",
+      "select state::text, payload from outbox where task_id = $1 order by id",
       [taskId],
     );
     expect(outbox).toEqual([
+      // The close's Knit Note refresh (N17), replaced by the correction's write-back.
+      { state: "superseded", payload: { note_only: true } },
       {
         state: "pending",
         payload: { status_value: "Done", completed_on: "2026-09-30" },
@@ -184,9 +201,10 @@ describe("admin_correct_task_day (PRD 6.10)", () => {
       },
       { day: "2026-10-03", status: "yet_to_start", locked: false },
     ]);
+    // No write-back; only the closes' Knit Note refresh waits (N17).
     expect(
       await db().query(
-        "select count(*)::int as n from outbox where task_id = $1",
+        "select count(*)::int as n from outbox where task_id = $1 and not (payload ? 'note_only')",
         [taskId],
       ),
     ).toEqual([{ n: 0 }]);

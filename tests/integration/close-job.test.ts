@@ -245,6 +245,186 @@ describe("close-days job (PRD 10.5)", () => {
       "2026-09-29",
       "2026-09-30",
     ]);
+    // The retry records what closing 28 Sep did, not zeros (19, invariant 8).
+    const expected = {
+      locked_as_is: 1,
+      not_done: 13,
+      spillovers: 13,
+      mismatches: 0,
+    };
+    expect(second.closed[0]!.stats).toMatchObject(expected);
+    const [stored] = await db().query<{ stats: Record<string, unknown> }>(
+      "select stats from day_closures where day = '2026-09-28'",
+    );
+    expect(stored!.stats).toMatchObject(expected);
+    expect(
+      (stored!.stats as { notesQueued: number }).notesQueued,
+    ).toBeGreaterThan(0);
+  });
+
+  const breakReads = () => {
+    const read = source.readRows.bind(source);
+    const state = { broken: true };
+    source.readRows = async (...args) => {
+      if (state.broken) throw new Error("Google 503");
+      return read(...args);
+    };
+    return state;
+  };
+
+  const rowOf = async (id: string) =>
+    (await source.readRows(ctx.ref, 1)).find(
+      (r) => r.cells.id?.formatted === id,
+    )!.rowNumber;
+
+  const pullRuns = async () =>
+    (
+      await db().query<{ n: number }>(
+        "select count(*)::int as n from sync_runs where job = 'pull'",
+      )
+    )[0]!.n;
+
+  it("does not close a day when its forced pull fails, and closes it once the pull works (10.5 steps 2, 3)", async () => {
+    // G02 was set to Done in the sheet after the last pull, before midnight (D10).
+    await source.setCell(ctx.ref, 1, await rowOf("G02"), "Status", "Done");
+    const reads = breakReads();
+
+    const first = await run();
+    expect(first.closed).toEqual([]);
+    expect(first.failed).toMatchObject({ day: "2026-09-28" });
+    expect(first.failed!.error).toContain("Forced pull incomplete");
+    expect(
+      await db().query("select day::text, state from day_closures"),
+    ).toEqual([{ day: "2026-09-28", state: "failed" }]);
+    expect(
+      await db().query(
+        "select count(*)::int as n from task_days where day = '2026-09-28' and locked",
+      ),
+    ).toEqual([{ n: 0 }]);
+
+    reads.broken = false;
+    const second = await run();
+    expect(second.closed.map((c) => c.day)).toEqual([
+      "2026-09-28",
+      "2026-09-29",
+      "2026-09-30",
+    ]);
+    expect(await days(db(), "G02")).toEqual([
+      { day: "2026-09-28", status: "done", spill_index: 0, locked: true },
+    ]);
+  });
+
+  it("leaves the day for the next call when the time budget runs out, without pulling again (invariant 8)", async () => {
+    let clock = 0;
+    const read = source.readRows.bind(source);
+    source.readRows = async (...args) => {
+      clock = 2_000; // the forced pull used up the budget
+      return read(...args);
+    };
+    const first = await closeDays(
+      { store: storeFor(db()), source, archive },
+      { deadline: 1_000, now: () => clock },
+    );
+    expect(first).toMatchObject({
+      closed: [],
+      failed: null,
+      waiting: { day: "2026-09-28" },
+    });
+    expect(
+      await db().query(
+        "select day::text, state, cardinality(pulled_trackers) as pulled from day_closures",
+      ),
+    ).toEqual([{ day: "2026-09-28", state: "running", pulled: 1 }]);
+    expect(
+      await db().query("select count(*)::int as n from task_days where locked"),
+    ).toEqual([{ n: 0 }]);
+
+    source.readRows = read;
+    const before = await pullRuns();
+    const second = await run();
+    expect(second.closed.map((c) => c.day)).toEqual([
+      "2026-09-28",
+      "2026-09-29",
+      "2026-09-30",
+    ]);
+    // 28 Sep was already pulled for its close: only 29 and 30 Sep pull again.
+    expect((await pullRuns()) - before).toBe(2);
+  });
+
+  it("waits for the pull and push jobs instead of running beside them (7.3, 14)", async () => {
+    const store = storeFor(db());
+    const pullHolder = await store.acquireLease("pull", 60);
+    const before = await pullRuns();
+    const busyPull = await closeDays(
+      { store, source, archive },
+      { leaseWaitMs: 0 },
+    );
+    expect(busyPull).toMatchObject({
+      closed: [],
+      failed: null,
+      waiting: { day: "2026-09-28", reason: "the pull job is running" },
+    });
+    expect(await pullRuns()).toBe(before);
+    await store.releaseLease("pull", pullHolder!);
+
+    // A write-back waits, and the push job holds its lease.
+    const g02 = await taskId(db(), "G02");
+    await db().query(
+      `insert into outbox (task_id, tracker_id, payload)
+       values ($1, $2, '{"status_value": "In progress", "completed_on": null}')`,
+      [g02, ctx.trackerId],
+    );
+    const pushHolder = await store.acquireLease("push", 60);
+    const busyPush = await closeDays(
+      { store, source, archive },
+      { leaseWaitMs: 0 },
+    );
+    expect(busyPush).toMatchObject({
+      closed: [],
+      waiting: { day: "2026-09-28", reason: "the push job is running" },
+    });
+    expect(
+      await db().query(
+        "select count(*)::int as n from task_days where day = '2026-09-28' and locked",
+      ),
+    ).toEqual([{ n: 0 }]);
+    await store.releaseLease("push", pushHolder!);
+
+    const free = await closeDays({ store, source, archive });
+    expect(free.closed.map((c) => c.day)).toEqual([
+      "2026-09-28",
+      "2026-09-29",
+      "2026-09-30",
+    ]);
+    const rows = await source.readRows(ctx.ref, 1);
+    expect(
+      rows.find((r) => r.cells.id?.formatted === "G02")!.cells.status!
+        .formatted,
+    ).toBe("In progress");
+  });
+
+  it("reads the sheet's word through statusMap, so words that mean Knit's status agree (10.6, Q4)", async () => {
+    await run();
+    // G03 is cancelled in Knit and written back as "Cancelled"; the sheet then says "Skipped",
+    // which the tracker reads as Cancelled too.
+    const g03 = await taskId(db(), "G03");
+    await queryAs(
+      db(),
+      { kind: "user", id: ctx.me },
+      "select set_task_status($1, 'cancelled', 'Not needed')",
+      [g03],
+    );
+    await pushDue({ store: storeFor(db()), source });
+    await source.setCell(ctx.ref, 1, await rowOf("G03"), "Status", "Skipped");
+    const store = storeFor(db());
+    expect(
+      await mismatchCheck({ store, source }, await store.trackers()),
+    ).toEqual({ checked: 34, mismatches: 0 });
+    expect(
+      await db().query(
+        "select count(*)::int as n from attention_items where kind = 'conflict'",
+      ),
+    ).toEqual([{ n: 0 }]);
   });
 
   it("counts sheet statuses that disagree with Knit in the nightly mismatch check (10.6)", async () => {

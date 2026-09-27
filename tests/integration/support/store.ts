@@ -51,6 +51,8 @@ const SIGNATURES: Record<
   begin_day_closure: { args: { p_day: "date" } },
   finish_day_closure: { args: { p_day: "date", p_stats: "jsonb" } },
   fail_day_closure: { args: { p_day: "date", p_error: "text" } },
+  close_pulled_trackers: { args: { p_day: "date" }, returns: "text[]" },
+  record_close_pull: { args: { p_day: "date", p_tracker_id: "uuid" } },
   close_day: { args: { p_day: "date" } },
   enqueue_note_refresh: { args: { p_task_ids: "uuid[]" } },
   archive_rows: { args: { p_day: "date" } },

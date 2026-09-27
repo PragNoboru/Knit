@@ -33,6 +33,8 @@ const DATE_REASONS: Record<string, string> = {
   unparseable: "Knit cannot read it as a date",
   empty: "the date is empty",
   outside_calendar: "it is outside the working-day calendar",
+  restored_after_close:
+    "the row came back after Knit had closed that day, so the task has no open day",
 };
 
 const str = (value: unknown) =>

@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { createUser } from "./support/builders";
+import {
+  createPlannedTask,
+  createTask,
+  createTaskDay,
+  createTracker,
+  createUser,
+  taskDays,
+} from "./support/builders";
 import { act, queryAs, setToday, useTestDb } from "./support/db";
 
 // PRD 6.2, D11, N2: working days are Mon to Fri plus the 1st and 3rd Saturday, minus holidays.
@@ -185,6 +192,100 @@ describe("refresh_calendar and holidays (PRD 6.2, 9.1, 9.2)", () => {
       "select is_working, reason from calendar_days where day = '2026-12-25'",
     );
     expect(removed).toEqual({ is_working: true, reason: null });
+  });
+
+  it("moves the open spillovers off a day that becomes a holiday (12.8, 6.4)", async () => {
+    const admin = await createUser(db(), { role: "admin" });
+    const trackerId = await createTracker(db());
+    // Sat 10 Oct (off). Fri 9 Oct closed and spilled to Mon 12 Oct.
+    await setToday(db(), "2026-10-10");
+    const spilled = async (status: string, statusChangedOn?: string) => {
+      const taskId = await createTask(db(), {
+        trackerId,
+        dueDate: "2026-10-09",
+        status,
+      });
+      await createTaskDay(db(), {
+        taskId,
+        day: "2026-10-09",
+        status: "not_done",
+        locked: true,
+      });
+      await createTaskDay(db(), {
+        taskId,
+        day: "2026-10-12",
+        status,
+        spillIndex: 1,
+        origin: "spillover",
+        statusChangedOn: statusChangedOn ?? null,
+      });
+      return taskId;
+    };
+    const open = await spilled("in_progress");
+    const finished = await spilled("done", "2026-10-10");
+    const clash = await spilled("yet_to_start");
+    await createTaskDay(db(), { taskId: clash, day: "2026-10-13" });
+    // A planned task-day follows its recomputed due date on the pull (6.3.3), not here.
+    const planned = await createPlannedTask(db(), {
+      trackerId,
+      day: "2026-10-12",
+    });
+    const [before] = await db().query<{ v: string }>(
+      "select state_version::text as v from trackers where id = $1",
+      [trackerId],
+    );
+
+    await queryAs(
+      db(),
+      { kind: "user", id: admin },
+      "insert into holidays (day, name) values ('2026-10-12', 'Office closed')",
+    );
+
+    const onDays = async (taskId: string) =>
+      (await taskDays(db(), taskId)).map((d) => [d.day, d.status]);
+    expect(await onDays(open)).toEqual([
+      ["2026-10-09", "not_done"],
+      ["2026-10-13", "in_progress"],
+    ]);
+    expect(await onDays(finished)).toEqual([
+      ["2026-10-09", "not_done"],
+      ["2026-10-12", "done"],
+    ]);
+    expect(await onDays(clash)).toEqual([
+      ["2026-10-09", "not_done"],
+      ["2026-10-12", "yet_to_start"],
+      ["2026-10-13", "yet_to_start"],
+    ]);
+    expect(await onDays(planned.taskId)).toEqual([
+      ["2026-10-12", "yet_to_start"],
+    ]);
+    expect(
+      await db().query(
+        `select task_id::text, origin::text, field, old_value, new_value, reason
+         from events`,
+      ),
+    ).toEqual([
+      {
+        task_id: open,
+        origin: "system",
+        field: "due_date",
+        old_value: "2026-10-12",
+        new_value: "2026-10-13",
+        reason: "Office closed",
+      },
+    ]);
+    expect(
+      await db().query(
+        "select task_id::text, kind, detail ->> 'reason' as reason from attention_items",
+      ),
+    ).toEqual([
+      { task_id: clash, kind: "bad_date", reason: "day_already_used" },
+    ]);
+    const [after] = await db().query<{ v: string }>(
+      "select state_version::text as v from trackers where id = $1",
+      [trackerId],
+    );
+    expect(Number(after!.v)).toBe(Number(before!.v) + 1);
   });
 
   it("does not let members edit holidays", async () => {

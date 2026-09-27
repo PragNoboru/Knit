@@ -26,6 +26,7 @@ export const ATTENTION_TITLES: Record<string, string> = {
   write_misplaced: "Write may be on the wrong row",
 };
 
+/** Why a date in the sheet cannot be used (6.3.1, 6.6). */
 const DATE_REASONS: Record<string, string> = {
   weekday_mismatch: "the weekday does not match the date",
   not_a_date: "it is not a real date",
@@ -33,8 +34,6 @@ const DATE_REASONS: Record<string, string> = {
   unparseable: "Knit cannot read it as a date",
   empty: "the date is empty",
   outside_calendar: "it is outside the working-day calendar",
-  restored_after_close:
-    "the row came back after Knit had closed that day, so the task has no open day",
 };
 
 const str = (value: unknown) =>
@@ -52,6 +51,26 @@ const day = (value: unknown) => {
   return isLocalDate(text) ? formatDay(text) : text;
 };
 
+/**
+ * A bad_date item. Most say why the row's date cannot be used. The others were read fine: they
+ * name the day a task-day could not go to (6.6, N30, N37), so the admin knows where to look.
+ */
+function describeBadDate(detail: Record<string, unknown>): string {
+  const reason = str(detail.reason);
+  switch (reason) {
+    case "day_already_used":
+      return `The task already has a task-day on ${day(detail.day)}, so its open task-day was not moved there.`;
+    case "day_already_closed":
+      return `The task's task-day on ${day(detail.day)} is already closed, so no new one was placed and the task has no open task-day.`;
+    case "became_open_ended":
+      return "The date became open-ended, but the task still has an open task-day, which Knit left as it was.";
+    case "restored_after_close":
+      return `The row came back after the task's task-day on ${day(detail.day)} was closed, so the task has no open task-day.`;
+    default:
+      return `The date "${str(detail.value)}" cannot be used: ${DATE_REASONS[reason] ?? "Knit cannot read it"}.`;
+  }
+}
+
 /** One sentence for an item. */
 export function describeAttention(
   kind: string,
@@ -64,7 +83,7 @@ export function describeAttention(
     case "unknown_owner":
       return `"${str(detail.name)}" is not a known person.`;
     case "bad_date":
-      return `The date "${str(detail.value)}" cannot be used: ${DATE_REASONS[str(detail.reason)] ?? "Knit cannot read it"}.`;
+      return describeBadDate(detail);
     case "past_date_added":
       return `Added with a due date already past (${day(detail.dueDate)}), so it starts today as a spillover.`;
     case "conflict":

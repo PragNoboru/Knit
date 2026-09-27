@@ -51,6 +51,12 @@ export async function withLease<T>(
 }
 
 /**
+ * The immediate push's lease TTL: the server action's maxDuration (app/(app)/layout.tsx), the
+ * longest the invocation that holds the lease can run.
+ */
+export const IMMEDIATE_PUSH_TTL_SECONDS = 60;
+
+/**
  * PRD 7.3: the immediate push of one task's write-back after a status change, under the push
  * lease. When a push is already running it is skipped: that push may be writing this task's
  * older write-back, and the newer one must land after it (10.4 step 1). The cron push, every
@@ -64,7 +70,29 @@ export async function pushTaskUnderLease(
   return withLease(
     deps.store,
     "push",
-    { ttlSeconds: options.ttlSeconds ?? 60 },
+    { ttlSeconds: options.ttlSeconds ?? IMMEDIATE_PUSH_TTL_SECONDS },
     () => pushDue(deps, { taskId, deadline: options.deadline }),
   );
+}
+
+/**
+ * PRD 7.3, N33: the immediate push as the server action runs it, after its response is sent
+ * (next/server `after`). The leased push is awaited to its end, so `after` keeps the
+ * invocation alive until the lease is released. Returning at the 5 s mark instead would leave
+ * the push running in an invocation the platform may freeze or end with the lease still held,
+ * and every push would be skipped until the lease expired. The 5 s budget is reported (`slow`),
+ * never used to walk away from a push that holds the lease.
+ */
+export async function pushTaskImmediately(
+  deps: { store: SyncStore; source: SheetSource },
+  taskId: string,
+  options: { timeoutMs?: number; now?: () => number } = {},
+): Promise<{ skipped: boolean; slow: boolean }> {
+  const now = options.now ?? Date.now;
+  const started = now();
+  const run = await pushTaskUnderLease(deps, taskId);
+  return {
+    skipped: run.skipped,
+    slow: now() - started > (options.timeoutMs ?? 5_000),
+  };
 }

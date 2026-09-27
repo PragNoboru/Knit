@@ -288,6 +288,99 @@ describe("refresh_calendar and holidays (PRD 6.2, 9.1, 9.2)", () => {
     expect(Number(after!.v)).toBe(Number(before!.v) + 1);
   });
 
+  it("queues a Knit Note refresh for each task whose task-day it moves, so the sheet stops naming the holiday (D7, N17)", async () => {
+    const admin = await createUser(db(), { role: "admin" });
+    const trackerId = await createTracker(db());
+    // Sat 10 Oct (off). Fri 9 Oct closed and spilled to Mon 12 Oct: "now due Mon 12 Oct".
+    await setToday(db(), "2026-10-10");
+    const spilled = async (status: string) => {
+      const taskId = await createTask(db(), {
+        trackerId,
+        dueDate: "2026-10-09",
+        status,
+      });
+      await createTaskDay(db(), {
+        taskId,
+        day: "2026-10-09",
+        status: "not_done",
+        locked: true,
+      });
+      await createTaskDay(db(), {
+        taskId,
+        day: "2026-10-12",
+        status,
+        spillIndex: 1,
+        origin: "spillover",
+      });
+      return taskId;
+    };
+    const open = await spilled("in_progress");
+    // A write-back already waiting writes the current note itself (N17).
+    const waiting = await spilled("yet_to_start");
+    await db().query(
+      `insert into outbox (task_id, tracker_id, payload)
+       values ($1, $2, '{"status_value": "Not started", "completed_on": null}')`,
+      [waiting, trackerId],
+    );
+    // Not moved (it already has a task-day on Tue 13 Oct): its note stays true.
+    const clash = await spilled("yet_to_start");
+    await createTaskDay(db(), { taskId: clash, day: "2026-10-13" });
+
+    await queryAs(
+      db(),
+      { kind: "user", id: admin },
+      "insert into holidays (day, name) values ('2026-10-12', 'Office closed')",
+    );
+
+    expect(
+      await db().query(
+        "select task_id::text, state::text, payload from outbox order by id",
+      ),
+    ).toEqual([
+      {
+        task_id: waiting,
+        state: "pending",
+        payload: { status_value: "Not started", completed_on: null },
+      },
+      { task_id: open, state: "pending", payload: { note_only: true } },
+    ]);
+  });
+
+  it("saves a holiday on the calendar's last working day when nothing has to move off it (12.8, N37)", async () => {
+    const admin = await createUser(db(), { role: "admin" });
+    await setToday(db(), "2026-09-28");
+    // Fri 31 Dec 2027: the calendar's last day, with no working day after it.
+    await queryAs(
+      db(),
+      { kind: "user", id: admin },
+      "insert into holidays (day, name) values ('2027-12-31', 'New Year Eve')",
+    );
+    const [day] = await db().query(
+      "select is_working, reason from calendar_days where day = '2027-12-31'",
+    );
+    expect(day).toEqual({ is_working: false, reason: "New Year Eve" });
+  });
+
+  it("refuses that holiday while an open spillover sits on it: Knit does not guess where it goes (invariant 7)", async () => {
+    const admin = await createUser(db(), { role: "admin" });
+    const trackerId = await createTracker(db());
+    await setToday(db(), "2026-09-28");
+    const taskId = await createTask(db(), { trackerId, dueDate: "2027-12-30" });
+    await createTaskDay(db(), {
+      taskId,
+      day: "2027-12-31",
+      spillIndex: 1,
+      origin: "spillover",
+    });
+    await expect(
+      queryAs(
+        db(),
+        { kind: "user", id: admin },
+        "insert into holidays (day, name) values ('2027-12-31', 'New Year Eve')",
+      ),
+    ).rejects.toMatchObject({ message: "calendar_not_covered" });
+  });
+
   it("does not let members edit holidays", async () => {
     const member = await createUser(db(), { role: "member" });
     await expect(

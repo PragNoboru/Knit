@@ -2,18 +2,14 @@ import { calendarFromDays } from "@/lib/domain/calendar";
 import type { TrackerConfig } from "@/lib/domain/config";
 import { aliasMap } from "@/lib/domain/owners";
 import { planPull, type PlanTask, type PullPlan } from "@/lib/domain/planPull";
-import {
-  isEmptyRow,
-  normaliseRow,
-  type NormalisedRow,
-} from "@/lib/domain/rows";
+import { normaliseRow, type NormalisedRow } from "@/lib/domain/rows";
 import {
   KNIT_ID_HEADER,
   type SheetSource,
   type TabRef,
 } from "@/lib/sheets/types";
 
-import { ensureKnitIds } from "./identity";
+import { ensureKnitIds, rowsWithContent } from "./identity";
 import { errorSummary, logEvent } from "./log";
 import type { PullRequest, SyncStore, SyncTracker } from "./store";
 import { checkStructure } from "./structure";
@@ -176,10 +172,9 @@ export async function pullTracker(
     const context = await store.loadContext();
     const calendar = calendarFromDays(context.calendar);
     const aliases = aliasMap(context.aliases);
+    // 10.2 step 3: rows empty in every mapped column are ignored.
     const readRows = async () =>
-      (await source.readRows(ref, config.headerRow)).filter(
-        (row) => !isEmptyRow(row, config),
-      );
+      rowsWithContent(await source.readRows(ref, config.headerRow), config);
     let idsWritten = 0;
     let idsCleared = 0;
     let idsRestored = 0;

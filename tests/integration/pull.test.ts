@@ -5,12 +5,13 @@ import type { CellWrite, TabRef } from "@/lib/sheets/types";
 import { loadXlsxFile } from "@/lib/sheets/xlsx";
 import { discover } from "@/lib/sync/discover";
 import { pullTracker } from "@/lib/sync/pull";
-import type { SyncTracker } from "@/lib/sync/store";
+import type { SyncStore, SyncTracker } from "@/lib/sync/store";
 
 import {
   createUser,
   fixtureTrackerConfig,
   FILING_BUDDY_GOOGLE_ADS,
+  taskDays,
 } from "./support/builders";
 import { setToday, useTestDb, type Db } from "./support/db";
 import { storeFor } from "./support/store";
@@ -370,6 +371,96 @@ describe("pull (PRD 10.2)", () => {
       outcome: "paused",
       reason: "the Knit ID column is missing",
     });
+  });
+
+  it("race: a plan loaded before the close of D is planned again after it, so the sheet's Done lands on the spillover (9.1, 10.2 step 7)", async () => {
+    await pull();
+    const [g02] = await db().query<{ id: string; due: string }>(
+      "select id::text, due_date::text as due from tasks where source_ref = 'G02'",
+    );
+    expect(g02!.due).toBe(TODAY);
+    const row = (await source.readRows(ctx.ref, 1)).find(
+      (r) => r.cells.id?.formatted === "G02",
+    )!.rowNumber;
+
+    // After midnight, before 28 Sep is closed, G02 is marked Done in the sheet. A pull loads
+    // Knit's state and reads the sheet; the close of 28 Sep commits before its plan is applied.
+    await setToday(db(), "2026-09-29");
+    await source.setCell(ctx.ref, 1, row, "Status", "Done");
+    const store = storeFor(db());
+    let closed = false;
+    const racing: SyncStore = {
+      ...store,
+      async applyPullPlan(...args) {
+        if (!closed) {
+          closed = true;
+          await store.closeDay(TODAY);
+        }
+        return store.applyPullPlan(...args);
+      },
+    };
+    expect(
+      await pullTracker(
+        { store: racing, source },
+        await trackerRow(db(), ctx.trackerId),
+        { force: true },
+      ),
+    ).toMatchObject({ outcome: "pulled" });
+    expect(closed).toBe(true);
+
+    const [task] = await db().query(
+      "select status::text, completed_on::text from tasks where id = $1",
+      [g02!.id],
+    );
+    expect(task).toEqual({ status: "done", completed_on: "2026-09-29" });
+    expect(
+      (await taskDays(db(), g02!.id)).map((d) => [d.day, d.status, d.locked]),
+    ).toEqual([
+      [TODAY, "not_done", true],
+      ["2026-09-29", "done", false],
+    ]);
+  });
+
+  it("a row restored after its removal was closed is reported even while another date item of its task is open (N30, invariant 7)", async () => {
+    await pull();
+    const [task] = await db().query<{ id: string; ref: string; due: string }>(
+      `select id::text, source_ref as ref, due_date::text as due from tasks
+       where due_date > '2026-09-30' and date_kind = 'single' order by due_date limit 1`,
+    );
+    const tab = file.tabs[0]!;
+    const index = tab.rows.findIndex((cells) =>
+      cells.some((c) => c.formatted === task!.ref),
+    );
+    const saved = tab.rows[index]!.map((cell) => ({ ...cell }));
+
+    // The row is deleted on 28 Sep; the close of 28 Sep freezes its cancelled task-day.
+    await source.deleteRow(ctx.ref, index + 1);
+    await pull();
+    await setToday(db(), "2026-09-29");
+    await storeFor(db()).closeDay(TODAY);
+    // Another date item of the task is still open (a clash raised earlier).
+    await db().query(
+      `insert into attention_items (tracker_id, task_id, kind, dedupe_key, detail)
+       values ($1, $2::uuid, 'bad_date', $3, '{"reason": "day_already_used"}')`,
+      [ctx.trackerId, task!.id, `bad_date:${task!.id}`],
+    );
+
+    // The row comes back.
+    await source.insertRow(ctx.ref, index + 1, saved);
+    await pull();
+    expect(
+      await db().query(
+        `select detail ->> 'reason' as reason from attention_items
+         where task_id = $1 and state = 'open' order by id`,
+        [task!.id],
+      ),
+    ).toEqual([
+      { reason: "day_already_used" },
+      { reason: "restored_after_close" },
+    ]);
+    expect(
+      (await taskDays(db(), task!.id)).map((d) => [d.day, d.status, d.locked]),
+    ).toEqual([[task!.due, "cancelled", true]]);
   });
 
   it("apply_pull_plan answers retry on a stale state_version and applies nothing (17)", async () => {

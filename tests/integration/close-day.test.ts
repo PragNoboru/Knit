@@ -288,6 +288,42 @@ describe("close_day (PRD 6.4, 9.1, D10)", () => {
     expect(await counts()).toEqual(firstCounts);
   });
 
+  it("moves the state_version of the trackers it changed, once: a second call moves nothing (8.1, 9.1)", async () => {
+    const quiet = await createTracker(db(), { name: "Quiet tracker" });
+    await createPlannedTask(db(), {
+      trackerId,
+      assignees: [member],
+      day: "2026-09-30",
+    });
+    // Nothing of this tracker is on 30 Sep: its plans stay valid.
+    await createPlannedTask(db(), {
+      trackerId: quiet,
+      assignees: [member],
+      day: "2026-10-01",
+    });
+    const versions = async () =>
+      Object.fromEntries(
+        (
+          await db().query<{ id: string; v: string }>(
+            "select id::text, state_version::text as v from trackers where id in ($1, $2)",
+            [trackerId, quiet],
+          )
+        ).map((row) => [row.id, Number(row.v)]),
+      );
+    const before = await versions();
+
+    await closeDay(db(), "2026-09-30", "2026-10-01");
+    const after = await versions();
+    expect(after).toEqual({
+      [trackerId]: before[trackerId]! + 1,
+      [quiet]: before[quiet],
+    });
+
+    // Invariant 8: the second call changes nothing, so a plan made after the first still holds.
+    await closeDay(db(), "2026-09-30", "2026-10-01");
+    expect(await versions()).toEqual(after);
+  });
+
   it("writes a system event for each task-day it turns into Not Done, and none for Blocked (15)", async () => {
     const open = await createPlannedTask(db(), {
       trackerId,

@@ -42,6 +42,41 @@ describe("Needs Attention texts (12.8)", () => {
     );
   });
 
+  it("names the day for date items whose date was read fine (6.6, N30, N37)", () => {
+    // Raised by the holiday move and by a moved planned date that clashes.
+    expect(
+      describeAttention("bad_date", {
+        reason: "day_already_used",
+        day: "2026-10-13",
+      }),
+    ).toBe(
+      "The task already has a task-day on Tue 13 Oct, so its open task-day was not moved there.",
+    );
+    expect(
+      describeAttention("bad_date", {
+        reason: "day_already_closed",
+        day: "2026-10-05",
+      }),
+    ).toBe(
+      "The task's task-day on Mon 5 Oct is already closed, so no new one was placed and the task has no open task-day.",
+    );
+    expect(
+      describeAttention("bad_date", { reason: "became_open_ended", row: 7 }),
+    ).toBe(
+      "The date became open-ended, but the task still has an open task-day, which Knit left as it was.",
+    );
+    expect(
+      describeAttention("bad_date", {
+        reason: "restored_after_close",
+        day: "2026-10-05",
+        row: 7,
+        value: "Mon 5 Oct",
+      }),
+    ).toBe(
+      "The row came back after the task's task-day on Mon 5 Oct was closed, so the task has no open task-day.",
+    );
+  });
+
   it("says which rows to check when rows moved under a write", () => {
     expect(
       describeAttention("write_misplaced", {

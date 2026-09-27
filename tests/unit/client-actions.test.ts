@@ -47,11 +47,36 @@ describe("callAction (finding 29)", () => {
   });
 
   it("callVoidAction reports a failed request instead of throwing", async () => {
-    expect(await callVoidAction(() => Promise.reject(new Error("x")))).toEqual({
+    expect(
+      await callVoidAction(() => Promise.reject(new TypeError("Load failed"))),
+    ).toEqual({
       ok: false,
       error: NETWORK_ERROR,
     });
     expect(await callVoidAction(async () => 3)).toEqual({ ok: true, value: 3 });
+  });
+
+  it("leaves an error the server threw to the error page with retry (PRD 14, review R12)", async () => {
+    // Supabase unavailable: the request reached the server, which threw.
+    const thrown = () =>
+      Promise.reject(
+        Object.assign(new Error("app_users read failed"), { digest: "42" }),
+      );
+    await expect(callAction(thrown)).rejects.toThrow("app_users read failed");
+    await expect(callVoidAction(thrown)).rejects.toThrow(
+      "app_users read failed",
+    );
+  });
+
+  it("counts any failure while the browser is offline as a request that never got through", async () => {
+    vi.stubGlobal("navigator", { onLine: false });
+    try {
+      expect(
+        await callAction(() => Promise.reject(new Error("aborted"))),
+      ).toEqual({ ok: false, error: NETWORK_ERROR });
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
 
@@ -65,6 +90,12 @@ describe("the Syncing poll (finding 29, 30)", () => {
   it("a poll that cannot reach the server changes nothing and does not throw", async () => {
     expect(
       await pollSyncStates(["a"], () => Promise.reject(new TypeError("x"))),
+    ).toBeNull();
+    // A server that could not answer: the background poll just tries again (review R12).
+    expect(
+      await pollSyncStates(["a"], () =>
+        Promise.reject(new Error("app_users read failed")),
+      ),
     ).toBeNull();
     expect(
       await pollSyncStates(["a", "b"], async () => ok({ a: "failed" })),

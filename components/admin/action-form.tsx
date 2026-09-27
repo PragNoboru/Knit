@@ -4,11 +4,12 @@ import { useActionState } from "react";
 
 import { Button } from "@/components/ui/button";
 import type { FormState } from "@/lib/actions/admin";
+import { withRequestErrors } from "@/lib/actions/call";
 import { cn } from "@/lib/utils";
 
 /**
- * A form posting to an admin server action, showing its error or notice in plain language.
- * Works without JavaScript too (the action redirects on success).
+ * A form posting to an admin server action, showing its error or notice in plain language,
+ * and so a request that never reached the server (N48), instead of the whole-page error.
  */
 export function ActionForm({
   action,
@@ -23,9 +24,10 @@ export function ActionForm({
   submitVariant?: "default" | "outline" | "destructive" | "secondary";
   className?: string;
 }) {
-  const [state, formAction, pending] = useActionState(action, {
-    error: null,
-  });
+  const [state, formAction, pending] = useActionState(
+    withRequestErrors(action, (error): FormState => ({ error })),
+    { error: null },
+  );
   return (
     <form action={formAction} className={cn("grid gap-4", className)}>
       {children}

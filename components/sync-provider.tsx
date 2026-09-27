@@ -33,15 +33,16 @@ export function pendingTaskIds(states: SyncStates): string[] {
 }
 
 /**
- * One poll. A failed request (no connection) changes nothing: the next tick tries again, and
- * the page never sees an unhandled rejection.
+ * One poll. A failed request (no connection, or a server that could not answer) changes
+ * nothing: the next tick tries again, and the page never sees an unhandled rejection. The poll
+ * runs in the background, so a server fault is not the error page's to show either.
  */
 export async function pollSyncStates(
   ids: readonly string[],
   fetch: (ids: string[]) => Promise<ActionResult<Record<string, SyncState>>>,
 ): Promise<Record<string, SyncState> | null> {
-  const result = await callAction(() => fetch([...ids]));
-  if (!result.ok) return null;
+  const result = await callAction(() => fetch([...ids])).catch(() => null);
+  if (!result?.ok) return null;
   return Object.fromEntries(ids.map((id) => [id, result.data[id] ?? null]));
 }
 

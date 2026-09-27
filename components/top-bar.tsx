@@ -16,7 +16,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { signOut } from "@/lib/actions/auth";
-import { callAction } from "@/lib/actions/call";
+import { callAction, callVoidAction } from "@/lib/actions/call";
 import { syncNow } from "@/lib/actions/tasks";
 import { cn } from "@/lib/utils";
 
@@ -34,6 +34,8 @@ export function TopBar({
 }) {
   const pathname = usePathname();
   const [, startSignOut] = useTransition();
+  // N48: a sign-out that never reached the server says so here, not on the error page.
+  const [signOutError, setSignOutError] = useState<string | null>(null);
   const links = [
     { href: "/", label: "Today", active: pathname === "/" },
     {
@@ -105,7 +107,13 @@ export function TopBar({
               </DropdownMenuGroup>
               <DropdownMenuSeparator />
               <DropdownMenuItem
-                onClick={() => startSignOut(async () => signOut())}
+                onClick={() =>
+                  startSignOut(async () => {
+                    setSignOutError(null);
+                    const result = await callVoidAction(() => signOut());
+                    if (!result.ok) setSignOutError(result.error);
+                  })
+                }
               >
                 <LogOut aria-hidden />
                 Sign out
@@ -113,6 +121,14 @@ export function TopBar({
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
+        {signOutError ? (
+          <p
+            role="alert"
+            className="order-last w-full text-xs text-destructive"
+          >
+            {signOutError}
+          </p>
+        ) : null}
       </div>
     </header>
   );

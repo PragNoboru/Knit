@@ -226,6 +226,120 @@ describe("pull (PRD 10.2)", () => {
     expect(items).toHaveLength(1);
   });
 
+  /** A row added at the bottom since the last pull, so the next pull writes its Knit ID. */
+  async function addNewRow(row: number) {
+    const cells = [
+      ["ID", "G35"],
+      ["Date", "Tue 29 Sep"],
+      ["Task", "A task added after go-live"],
+      ["Owner", "Pragaman"],
+      ["Status", "Not started"],
+    ] as const;
+    for (const [header, value] of cells)
+      await source.setCell(ctx.ref, 1, row, header, value);
+  }
+
+  /** Runs `edit` as a person would, just before the first Knit ID write reaches the sheet. */
+  function editBeforeIdWrite(
+    edit: (sheet: MemorySheetSource) => Promise<void>,
+  ) {
+    return class extends MemorySheetSource {
+      armed = true;
+      override async writeCells(
+        ref: TabRef,
+        headerRow: number,
+        cells: CellWrite[],
+      ) {
+        if (
+          this.armed &&
+          cells.some((c) => c.header === "Knit ID" && c.value !== "")
+        ) {
+          this.armed = false;
+          await edit(this);
+        }
+        await super.writeCells(ref, headerRow, cells);
+      }
+    };
+  }
+
+  const removedCount = () =>
+    db().query(
+      "select count(*)::int as n from tasks where removed_at_source is not null",
+    );
+
+  it("race: a row inserted just before a Knit ID write lands: the Knit ID it hit is put back and nothing is removed (10.2 step 4, 14)", async () => {
+    await pull();
+    await addNewRow(36);
+    const [g34] = await db().query<{ id: string }>(
+      "select id::text from tasks where source_ref = 'G34'",
+    );
+    // Someone inserts a row at the top as the write goes out: G34 moves into row 36, where
+    // Knit writes the new row's ID.
+    const Sheet = editBeforeIdWrite((sheet) => sheet.insertRow(ctx.ref, 2, []));
+    source = new Sheet([file]);
+    expect(await pull()).toMatchObject({
+      outcome: "pulled",
+      idsWritten: 1,
+      idsCleared: 0,
+      stats: { inserted: 0, removed: 0 },
+    });
+    const rows = await source.readRows(ctx.ref, 1);
+    const knitIdOf = (ref: string) =>
+      rows.find((r) => r.cells.id?.formatted === ref)?.cells["knit id"]
+        ?.formatted;
+    expect(knitIdOf("G34")).toBe(g34!.id);
+    expect(knitIdOf("G35")).toBe("");
+    expect(await removedCount()).toEqual([{ n: 0 }]);
+
+    // The new row gets its ID on the next pull.
+    expect(await pull()).toMatchObject({
+      idsWritten: 1,
+      stats: { inserted: 1, removed: 0 },
+    });
+  });
+
+  it("race: when the Knit ID a write hit cannot be put back, the pull applies nothing and says so (invariant 7)", async () => {
+    await pull();
+    await addNewRow(36);
+    // A row is inserted at the top and G34 (now in row 36) is renamed at the same moment.
+    const Sheet = editBeforeIdWrite(async (sheet) => {
+      await sheet.insertRow(ctx.ref, 2, []);
+      await sheet.setCell(ctx.ref, 1, 36, "Task", "Offline conversions (v2)");
+    });
+    source = new Sheet([file]);
+    expect(await pull()).toMatchObject({ outcome: "stale" });
+    expect(await removedCount()).toEqual([{ n: 0 }]);
+    const items = await db().query(
+      "select kind, detail ->> 'reason' as reason from attention_items",
+    );
+    expect(items).toEqual([
+      { kind: "write_misplaced", reason: "knit_id_lost" },
+    ]);
+  });
+
+  it("a Knit ID typed again in capitals is still the same ID (invariant 3)", async () => {
+    await pull();
+    const [first] = await source.readColumn(ctx.ref, 1, "Knit ID");
+    await source.setCell(ctx.ref, 1, 2, "Knit ID", first!.value.toUpperCase());
+    expect(await pull()).toMatchObject({
+      outcome: "pulled",
+      idsWritten: 0,
+      stats: { inserted: 0, removed: 0 },
+    });
+    expect(await removedCount()).toEqual([{ n: 0 }]);
+  });
+
+  it("picks up a renamed tab's new name and keeps syncing it (7.4, 14)", async () => {
+    await pull();
+    file.tabs[0]!.title = "Q4 Tasks";
+    expect(await pull()).toMatchObject({ outcome: "pulled" });
+    const [tracker] = await db().query(
+      "select tab_name from trackers where id = $1",
+      [ctx.trackerId],
+    );
+    expect(tracker).toEqual({ tab_name: "Q4 Tasks" });
+  });
+
   it("pauses the tracker when a mapped column is renamed, and says which (10.2 step 2, 14)", async () => {
     await pull();
     await source.setCell(ctx.ref, 1, 1, "Status", "State");

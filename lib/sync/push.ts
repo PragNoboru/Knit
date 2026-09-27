@@ -16,7 +16,6 @@ import {
   type SourceSnapshot,
 } from "@/lib/domain/rows";
 import {
-  KNIT_ID_HEADER,
   KNIT_NOTE_HEADER,
   type CellWrite,
   type SheetSource,
@@ -24,6 +23,7 @@ import {
 } from "@/lib/sheets/types";
 import { formatDate, fromSheetsSerial, type LocalDate } from "@/lib/time";
 
+import { knitIdOf, rowsByKnitId } from "./identity";
 import { errorSummary, logEvent } from "./log";
 import type { SyncStore } from "./store";
 import { checkStructure } from "./structure";
@@ -31,13 +31,17 @@ import { checkStructure } from "./structure";
 /**
  * PRD 10.4: the push job writes Knit's changes back to the sheets.
  *   1. Claim due write-backs (newest per task; paused trackers held).
- *   2. Per tracker: read the rows and find each task's row by its Knit ID at write time.
+ *   2. Per tracker: read the rows and find each task's row by its Knit ID at write time. A
+ *      Knit ID found on two rows (a pasted copy, 14) is not guessed at: nothing is written and
+ *      the write-back is retried after the next pull has given the lower row a new ID.
  *   3. Never write to a formula or read-only column (N6).
  *   4. Status word (unless the tracker cannot express it, N8), completed-on cell (value on done,
- *      cleared on revert of a value Knit wrote) and the Knit Note, in one batch.
- *   5. Re-read and verify by Knit ID. Verified: done, with the sheet's values as the new
- *      snapshot. Otherwise retry with backoff. A write that landed on another row (rows sorted
- *      mid-push) is undone from the values read just before.
+ *      cleared on a revert from the Done the sheet shows) and the Knit Note, in one batch.
+ *   5. Re-read and verify by Knit ID. Verified: done, and the cells Knit wrote (only those)
+ *      become the new snapshot (10.3). Otherwise retry with backoff. A write that landed on
+ *      another row (rows sorted mid-push) is undone from the values read just before; when that
+ *      row cannot be named by its Knit ID, its value cannot be put back exactly, or the sheet
+ *      cannot be read back at all, attention write_misplaced says which rows to check.
  */
 
 export interface ClaimedWrite {
@@ -73,14 +77,14 @@ export interface PushStats {
   failed: number;
 }
 
-const idOf = (row: SheetRow) =>
-  textOf(cellOf(row, KNIT_ID_HEADER)).toLowerCase();
-
 function dateOf(cell: CellValue, today: LocalDate): LocalDate | null {
   if (typeof cell.value === "number") return fromSheetsSerial(cell.value);
   const parsed = parseDateText(normaliseDateText(textOf(cell)), today);
   return parsed.kind === "single" ? parsed.start : null;
 }
+
+const sameHeader = (a: string, b: string | null) =>
+  b !== null && normaliseKey(a) === normaliseKey(b);
 
 /** The cells to write for one claimed write-back. */
 export function cellsFor(
@@ -108,6 +112,7 @@ export function cellsFor(
   const format = config.completedOnFormat;
   if (!noteOnly && config.columns.completedOn && format) {
     const completedOn = item.payload.completed_on ?? null;
+    const shown = item.task.sourceSnapshot;
     if (completedOn) {
       cells.push(
         format.type === "date"
@@ -124,8 +129,12 @@ export function cellsFor(
               value: formatDate(completedOn, format.pattern),
             },
       );
-    } else if (item.task.sourceSnapshot?.completedOn) {
-      // Reverted from Done: clear the value Knit wrote (never a value Knit did not write).
+    } else if (
+      shown?.completedOn &&
+      config.statusMap[shown.statusKey] === "done"
+    ) {
+      // 10.4 step 4: a revert from the Done the sheet shows clears its completed-on value. A
+      // date beside any other status (typed by a person) is not Knit's to clear.
       cells.push({
         row,
         header: config.columns.completedOn,
@@ -146,17 +155,60 @@ function holds(row: SheetRow, cell: CellWrite, today: LocalDate): boolean {
   return textOf(actual) === cell.value.trim();
 }
 
-function snapshotOf(
+/**
+ * 10.3: what a verified write puts in source_snapshot: exactly the mapped cells Knit wrote,
+ * re-read from the sheet, and nothing it did not write (a note-only write-back, or a status the
+ * tracker cannot express, N8, leaves the other values as the last pull saw them). Null when it
+ * wrote neither cell. push_result merges it into the task's snapshot.
+ */
+export function writtenSnapshot(
   row: SheetRow,
+  cells: readonly CellWrite[],
   config: TrackerConfig,
   today: LocalDate,
-): SourceSnapshot {
-  return {
-    statusKey: normaliseKey(textOf(cellOf(row, config.columns.statusRead))),
-    completedOn: config.columns.completedOn
-      ? dateOf(cellOf(row, config.columns.completedOn), today)
-      : null,
-  };
+): Partial<SourceSnapshot> | null {
+  const wrote = (header: string | null) =>
+    cells.some((cell) => sameHeader(cell.header, header));
+  const snapshot: Partial<SourceSnapshot> = {};
+  if (wrote(config.columns.statusWrite)) {
+    snapshot.statusKey = normaliseKey(
+      textOf(cellOf(row, config.columns.statusRead)),
+    );
+  }
+  if (config.columns.completedOn && wrote(config.columns.completedOn)) {
+    snapshot.completedOn = dateOf(
+      cellOf(row, config.columns.completedOn),
+      today,
+    );
+  }
+  return Object.keys(snapshot).length > 0 ? snapshot : null;
+}
+
+/**
+ * The write that puts one cell back as `original` had it, or null when no write can do that
+ * exactly (a checkbox, a date with a time, a number outside the completed-on column).
+ */
+function restoreOf(
+  original: SheetRow,
+  cell: CellWrite,
+  config: TrackerConfig,
+): CellWrite | null {
+  const was = cellOf(original, cell.header);
+  const at = { row: cell.row, header: cell.header };
+  if (textOf(was) === "" && (was.value === null || was.value === "")) {
+    return { ...at, kind: "text", value: "" };
+  }
+  if (typeof was.value === "string") {
+    return { ...at, kind: "text", value: was.value };
+  }
+  if (
+    typeof was.value === "number" &&
+    Number.isInteger(was.value) &&
+    sameHeader(cell.header, config.columns.completedOn)
+  ) {
+    return { ...at, kind: "date", value: fromSheetsSerial(was.value) };
+  }
+  return null;
 }
 
 async function pushTracker(
@@ -167,6 +219,7 @@ async function pushTracker(
 ): Promise<void> {
   const { store, source } = deps;
   const first = items[0]!;
+  const trackerId = first.tracker.id;
   const config = TrackerConfig.parse(first.tracker.config);
   const ref: TabRef = {
     fileId: first.tracker.fileId,
@@ -176,7 +229,7 @@ async function pushTracker(
   const settle = async (
     item: ClaimedWrite,
     ok: boolean,
-    snapshot: SourceSnapshot | null,
+    snapshot: Partial<SourceSnapshot> | null,
     error: string | null,
     statusRaw: string | null = null,
   ) => {
@@ -221,16 +274,23 @@ async function pushTracker(
       writable.delete(blocked);
     }
     const before = await source.readRows(ref, config.headerRow);
-    const rowOfTask = new Map(before.map((row) => [idOf(row), row]));
+    const beforeById = rowsByKnitId(before);
 
     const planned: { item: ClaimedWrite; cells: CellWrite[] }[] = [];
     for (const item of items) {
-      const row = rowOfTask.get(item.task.id.toLowerCase());
-      if (!row) {
+      const holders = beforeById.get(item.task.id.toLowerCase()) ?? [];
+      if (holders.length === 0) {
         await settle(item, false, null, "row_not_found");
         continue;
       }
-      const cells = cellsFor(item, config, row.rowNumber, today);
+      if (holders.length > 1) {
+        // 14: a pasted copy carries the Knit ID too. The next pull gives the lower row a new
+        // ID (and raises duplicate_knit_id); until then Knit does not guess which row is the
+        // task's, and the write-back waits for its retry.
+        await settle(item, false, null, "duplicate_knit_id");
+        continue;
+      }
+      const cells = cellsFor(item, config, holders[0]!.rowNumber, today);
       if (cells.some((cell) => !writable.has(normaliseKey(cell.header)))) {
         await settle(item, false, null, "formula_column");
         continue;
@@ -244,39 +304,65 @@ async function pushTracker(
       config.headerRow,
       planned.flatMap((p) => p.cells),
     );
-    const after = await source.readRows(ref, config.headerRow);
-    const afterById = new Map(after.map((row) => [idOf(row), row]));
+    let after: SheetRow[];
+    try {
+      after = await source
+        .readRows(ref, config.headerRow)
+        .catch(() => source.readRows(ref, config.headerRow));
+    } catch (error) {
+      // The write went out but cannot be checked. If rows moved meanwhile it may sit on other
+      // rows, so say which rows were written instead of staying silent (invariant 7). The
+      // write-backs are retried as usual.
+      await store.raiseAttention(
+        trackerId,
+        null,
+        "write_misplaced",
+        "write_misplaced:unverified",
+        {
+          reason: "unverified",
+          rows: [...new Set(planned.map((p) => p.cells[0]!.row))].sort(
+            (a, b) => a - b,
+          ),
+        },
+      );
+      throw error;
+    }
+    const afterById = rowsByKnitId(after);
     const afterByNumber = new Map(after.map((row) => [row.rowNumber, row]));
-    const beforeById = new Map(before.map((row) => [idOf(row), row]));
 
     const repairs: CellWrite[] = [];
+    const stray = new Map<number, Set<string>>();
     for (const { item, cells } of planned) {
-      const row = afterById.get(item.task.id.toLowerCase());
+      const id = item.task.id.toLowerCase();
+      const holders = afterById.get(id) ?? [];
+      const row = holders.length === 1 ? holders[0] : undefined;
       if (row && cells.every((cell) => holds(row, cell, today))) {
-        const statusRaw = textOf(cellOf(row, config.columns.statusRead));
-        await settle(
-          item,
-          true,
-          snapshotOf(row, config, today),
-          null,
-          statusRaw,
-        );
+        const snapshot = writtenSnapshot(row, cells, config, today);
+        const statusRaw =
+          snapshot?.statusKey !== undefined
+            ? textOf(cellOf(row, config.columns.statusRead))
+            : null;
+        await settle(item, true, snapshot, null, statusRaw);
         continue;
       }
-      // Rows moved between reading and writing: undo the write on whichever row got it.
+      // Rows moved between reading and writing: undo the write on whichever row got it, from
+      // the values read just before. Only a row named by a Knit ID that was on one row before
+      // is put back (invariant 3), and only with a write that restores its value exactly.
       for (const cell of cells) {
         const landed = afterByNumber.get(cell.row);
-        const landedId = landed ? idOf(landed) : "";
-        if (!landed || landedId === item.task.id.toLowerCase()) continue;
-        const original = beforeById.get(landedId);
-        if (original && holds(landed, cell, today)) {
-          repairs.push({
-            row: cell.row,
-            header: cell.header,
-            kind: "text",
-            value: textOf(cellOf(original, cell.header)),
-          });
-        }
+        if (!landed || !holds(landed, cell, today)) continue;
+        const landedId = knitIdOf(landed);
+        if (landedId === id) continue;
+        const originals = beforeById.get(landedId) ?? [];
+        const original = originals.length === 1 ? originals[0] : undefined;
+        if (original && holds(original, cell, today)) continue;
+        const restore = original ? restoreOf(original, cell, config) : null;
+        if (restore) repairs.push(restore);
+        else
+          stray.set(
+            cell.row,
+            (stray.get(cell.row) ?? new Set()).add(cell.header),
+          );
       }
       await settle(item, false, null, "verify_mismatch");
     }
@@ -284,15 +370,25 @@ async function pushTracker(
       await source.writeCells(ref, config.headerRow, repairs);
       logEvent("push.repaired", {
         job: "push",
-        tracker: first.tracker.id,
+        tracker: trackerId,
         cells: repairs.length,
       });
+    }
+    for (const [row, headers] of stray) {
+      await store.raiseAttention(
+        trackerId,
+        null,
+        "write_misplaced",
+        `write_misplaced:row:${row}`,
+        { reason: "stray_write", row, headers: [...headers] },
+      );
+      logEvent("push.stray_write", { job: "push", tracker: trackerId, row });
     }
   } catch (error) {
     const message = errorSummary(error);
     logEvent("push.tracker_failed", {
       job: "push",
-      tracker: first.tracker.id,
+      tracker: trackerId,
       error: message,
     });
     for (const item of items)

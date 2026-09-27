@@ -95,7 +95,9 @@ test("the wizard connects a new sheet end to end", async ({ page }, info) => {
     .selectOption("Yes");
   await page
     .getByRole("combobox", { name: "Cancelled", exact: true })
-    .selectOption("Not needed");
+    // The export has no Lists tab, so its dropdown cannot be read and only the words in use
+    // (Yes, No) can be written back (11 step 5): Cancelled leaves the cell alone (N8).
+    .selectOption("__leave__");
   await page.getByRole("button", { name: "Save and continue" }).click();
 
   // Step 6: owners and policies.
@@ -174,7 +176,7 @@ test("the other admin screens", async ({ page }, info) => {
   await expect(
     page
       .getByRole("region", { name: "Users" })
-      .getByRole("cell", { name: "Asha" }),
+      .getByRole("cell", { name: "Asha", exact: true }),
   ).toBeVisible();
   await shoot("admin-people");
 
@@ -192,7 +194,11 @@ test.describe("a member", () => {
   test.use({ storageState: STATE.member });
 
   test("cannot open the admin screens", async ({ page }) => {
-    const response = await page.goto("/admin/trackers");
-    expect(response?.status()).toBe(404);
+    // The page streams (loading.tsx), so the not-found page comes with status 200.
+    await page.goto("/admin/trackers");
+    await expect(page.getByText("This page could not be found.")).toBeVisible();
+    await expect(page.getByRole("navigation", { name: "Admin" })).toHaveCount(
+      0,
+    );
   });
 });

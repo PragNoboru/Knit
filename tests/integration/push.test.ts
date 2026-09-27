@@ -149,7 +149,11 @@ describe("push (PRD 10.4)", () => {
     );
     expect(row).toEqual({
       state: "done",
-      source_snapshot: { statusKey: "done", completedOn: TODAY },
+      source_snapshot: {
+        statusKey: "done",
+        completedOn: TODAY,
+        status: "done",
+      },
     });
   });
 
@@ -366,6 +370,7 @@ describe("push (PRD 10.4)", () => {
     expect(task!.source_snapshot).toEqual({
       statusKey: "not started",
       completedOn: null,
+      status: "yet_to_start",
     });
     // The sheet's Done is a change in the sheet the next pull still sees.
     await pull();
@@ -525,6 +530,7 @@ describe("push (PRD 10.4)", () => {
     expect(task!.source_snapshot).toEqual({
       statusKey: "done",
       completedOn: TODAY,
+      status: "done",
     });
     expect(await conflicts()).toEqual([{ n: 0 }]);
   });

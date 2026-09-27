@@ -34,8 +34,8 @@ export interface SourceSnapshot {
    * while the word is unmapped). When the admin maps or remaps a word that stays the same in
    * the sheet (N19 d, 11), the mapped status differs from this, so the next pull treats it as
    * a change made in the source and applies it (10.3; a change made in Knit still wins).
-   * Absent from snapshots saved before it was recorded and from the ones the push saves after
-   * a write-back (10.4 step 5): for those only the word and Completed On are compared.
+   * Absent from snapshots saved before it was recorded: for those only the word and Completed
+   * On are compared. A push that writes the status cell records it with the word (10.4 step 5).
    */
   status?: UserStatus;
 }

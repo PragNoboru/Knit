@@ -57,3 +57,6 @@ next-env.d.ts
 
 # Local development sheets (KNIT_SHEET_SOURCE=local)
 /.knit-local/
+
+# Worktrees made by Claude Code agents
+/.claude/worktrees/

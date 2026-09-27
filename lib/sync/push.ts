@@ -9,6 +9,7 @@ import {
   type CellValue,
 } from "@/lib/domain/dates";
 import { renderKnitNote, type NoteTaskDay } from "@/lib/domain/note";
+import { mapSourceStatus } from "@/lib/domain/status";
 import {
   cellOf,
   textOf,
@@ -171,9 +172,11 @@ export function writtenSnapshot(
     cells.some((cell) => sameHeader(cell.header, header));
   const snapshot: Partial<SourceSnapshot> = {};
   if (wrote(config.columns.statusWrite)) {
-    snapshot.statusKey = normaliseKey(
-      textOf(cellOf(row, config.columns.statusRead)),
-    );
+    const word = textOf(cellOf(row, config.columns.statusRead));
+    snapshot.statusKey = normaliseKey(word);
+    // With the word, the Knit status it maps to, as a pull would record it (10.3): the next
+    // pull then sees Knit's own write as no change.
+    snapshot.status = mapSourceStatus(word, config).status;
   }
   if (config.columns.completedOn && wrote(config.columns.completedOn)) {
     snapshot.completedOn = dateOf(

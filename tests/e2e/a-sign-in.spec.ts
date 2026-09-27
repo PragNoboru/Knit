@@ -18,7 +18,7 @@ test("a wrong password is refused in plain language", async ({ page }) => {
   await page.getByLabel("Email").fill(USERS.admin);
   await page.getByLabel("Password").fill("not-the-password");
   await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.getByRole("alert")).toHaveText(
+  await expect(page.locator("form").getByRole("alert")).toHaveText(
     "That email and password don't match.",
   );
 });

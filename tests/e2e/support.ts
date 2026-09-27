@@ -27,13 +27,15 @@ export async function signIn(page: Page, who: keyof typeof USERS) {
   const home = page
     .waitForURL((url) => url.pathname === "/", { timeout: 15_000 })
     .catch(() => undefined);
+  // The form's own message: Next.js also keeps a hidden route announcer with role alert.
   const refused = page
+    .locator("form")
     .getByRole("alert")
     .waitFor({ timeout: 15_000 })
     .catch(() => undefined);
   await Promise.race([home, refused]);
   if (new URL(page.url()).pathname !== "/") {
-    const alert = page.getByRole("alert");
+    const alert = page.locator("form").getByRole("alert");
     const message =
       (await alert.count()) > 0
         ? await alert.first().innerText()

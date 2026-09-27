@@ -119,35 +119,46 @@ export class GoogleArchive implements ArchiveSink {
     );
   }
 
-  /** Creates the archive tabs, with their header rows, if they are missing. */
+  /**
+   * Creates the archive tabs, with their header rows, if they are missing. Each tab and its
+   * header row go in one batchUpdate, which Google applies whole or not at all, so a tab never
+   * exists without its header (replaceDay keeps row 1). The new tabs get the lowest free
+   * sheetIds, so the header can be written in the same batch.
+   */
   private async ensureTabs(): Promise<Map<string, number>> {
-    let tabs = await this.tabs();
+    const tabs = await this.tabs();
     const missing = Object.values(ARCHIVE_TABS).filter(
       (t) => !tabs.has(t.title),
     );
     if (missing.length === 0) return tabs;
+    const used = new Set(tabs.values());
+    const ids: number[] = [];
+    for (let id = 1; ids.length < missing.length; id += 1)
+      if (!used.has(id)) ids.push(id);
     await this.api.request(`${SHEETS}/${this.spreadsheetId}:batchUpdate`, {
       method: "POST",
+      // Not repeated after a 5xx (google-api.ts): the next close run adds what is missing.
+      idempotent: false,
       body: {
-        requests: missing.map((t) => ({
-          addSheet: { properties: { title: t.title } },
-        })),
+        requests: missing.flatMap((t, i) => [
+          { addSheet: { properties: { sheetId: ids[i], title: t.title } } },
+          {
+            updateCells: {
+              start: { sheetId: ids[i], rowIndex: 0, columnIndex: 0 },
+              rows: [
+                {
+                  values: t.header.map((name) => ({
+                    userEnteredValue: { stringValue: name },
+                  })),
+                },
+              ],
+              fields: "userEnteredValue",
+            },
+          },
+        ]),
       },
     });
-    await this.api.request(
-      `${SHEETS}/${this.spreadsheetId}/values:batchUpdate`,
-      {
-        method: "POST",
-        body: {
-          valueInputOption: "RAW",
-          data: missing.map((t) => ({
-            range: `'${t.title}'!A1`,
-            values: [t.header],
-          })),
-        },
-      },
-    );
-    tabs = await this.tabs();
+    missing.forEach((t, i) => tabs.set(t.title, ids[i]!));
     return tabs;
   }
 
@@ -159,7 +170,10 @@ export class GoogleArchive implements ArchiveSink {
       const column = await this.api.request<{ values?: unknown[][] }>(
         `${SHEETS}/${this.spreadsheetId}/values/${encodeURIComponent(`'${title}'!A:A`)}`,
       );
-      // Rows already holding day D, deleted bottom-up so indexes stay valid.
+      // Rows already holding day D, deleted bottom-up so indexes stay valid. Neither the delete
+      // nor the append is repeated after a 5xx: Google may have applied it, and a repeat would
+      // delete other days' rows by stale index, or append D's rows twice. The close fails
+      // instead and its next run redoes this step from the column read (10.5 step 3).
       const indexes = (column.values ?? [])
         .map((row, index) => (cell(row[0]) === day ? index : -1))
         .filter((index) => index > 0)
@@ -167,6 +181,7 @@ export class GoogleArchive implements ArchiveSink {
       if (indexes.length > 0) {
         await this.api.request(`${SHEETS}/${this.spreadsheetId}:batchUpdate`, {
           method: "POST",
+          idempotent: false,
           body: {
             requests: indexes.map((index) => ({
               deleteDimension: {
@@ -190,6 +205,7 @@ export class GoogleArchive implements ArchiveSink {
           `${SHEETS}/${this.spreadsheetId}/values/${encodeURIComponent(`'${title}'!A1`)}:append?${params}`,
           {
             method: "POST",
+            idempotent: false,
             body: { values: rows[key].map((row) => row.map(cell)) },
           },
         );

@@ -125,9 +125,11 @@ function cellOf(cell: XLSX.CellObject | undefined): MemoryCell {
           ? null
           : String(cell.v ?? "");
   const formatted = cell.w ?? (value === null ? "" : String(value));
-  return cell.f
-    ? { value, formatted, formula: `=${cell.f}` }
-    : { value, formatted };
+  // N6: every cell of an array formula's range carries F (the range); only its first cell
+  // holds the formula (f). The others are filled by it, as Google's array formula outputs.
+  if (cell.f) return { value, formatted, formula: `=${cell.f}` };
+  if (cell.F) return { value, formatted, formula: `{array ${cell.F}}` };
+  return { value, formatted };
 }
 
 /** One workbook as a MemoryFile. The file name (without extension) is its id. */

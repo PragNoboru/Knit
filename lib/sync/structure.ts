@@ -1,12 +1,18 @@
 import { normaliseKey, type TrackerConfig } from "@/lib/domain/config";
 import { templateHeaders } from "@/lib/domain/templates";
-import { KNIT_ID_HEADER, type TabStructure } from "@/lib/sheets/types";
+import {
+  KNIT_ID_HEADER,
+  KNIT_NOTE_HEADER,
+  type TabStructure,
+} from "@/lib/sheets/types";
 
 /**
- * PRD 10.2 step 2, 6.8, N6, 14: a tracker's layout must still match its registry before
- * anything is read or written. Every mapped header must be there exactly once, the Knit ID
- * column must exist, and neither write target may hold formulas. Any problem pauses the
- * tracker with a reason the admin can act on (invariant 7).
+ * PRD 10.2 step 2, 6.8, 7.3, N6, D7, 14: a tracker's layout must still match its registry
+ * before anything is read or written. Every mapped header must be there exactly once, Knit's
+ * own columns (Knit ID and Knit Note) must each be there exactly once, and no column Knit
+ * writes (status, completed-on, Knit ID, Knit Note) may hold formulas. Any problem pauses the
+ * tracker with a reason the admin can act on (invariant 7), and its write-backs are held until
+ * it resumes (10.4 step 1).
  */
 
 export interface StructureProblem {
@@ -79,6 +85,27 @@ export function checkStructure(
       detail: {},
     };
   }
+  // D7: every push writes the Knit Note, so without its column no write-back could land.
+  if (!present.has(normaliseKey(KNIT_NOTE_HEADER))) {
+    return {
+      kind: "missing_header",
+      dedupeKey: `missing_header:${normaliseKey(KNIT_NOTE_HEADER)}`,
+      reason: "the Knit Note column is missing",
+      detail: { header: KNIT_NOTE_HEADER },
+    };
+  }
+  // Knit reads and writes its columns by header, first match only: a copy would be ignored.
+  for (const header of [KNIT_ID_HEADER, KNIT_NOTE_HEADER]) {
+    const key = normaliseKey(header);
+    if (duplicates.has(key)) {
+      return {
+        kind: "missing_header",
+        dedupeKey: `missing_header:${key}`,
+        reason: `column '${header}' appears more than once`,
+        detail: { header, duplicate: true },
+      };
+    }
+  }
 
   const readOnly = new Set([
     ...structure.formulaColumns,
@@ -87,6 +114,8 @@ export function checkStructure(
   for (const target of [
     config.columns.statusWrite,
     config.columns.completedOn,
+    KNIT_ID_HEADER,
+    KNIT_NOTE_HEADER,
   ]) {
     if (target && readOnly.has(normaliseKey(target))) {
       return {

@@ -26,6 +26,7 @@ import { formatDate, fromSheetsSerial, type LocalDate } from "@/lib/time";
 
 import { errorSummary, logEvent } from "./log";
 import type { SyncStore } from "./store";
+import { checkStructure } from "./structure";
 
 /**
  * PRD 10.4: the push job writes Knit's changes back to the sheets.
@@ -193,6 +194,25 @@ async function pushTracker(
 
   try {
     const structure = await source.readStructure(ref, config.headerRow);
+    // 14: a column missing or doubled (a mapped header, Knit ID, Knit Note) pauses the tracker,
+    // as the pull would. The claimed write-backs are left unsettled, so push_claim holds them
+    // until it resumes (10.4 step 1). A formula write target fails the row instead (step 3).
+    const problem = checkStructure(structure, config);
+    if (problem && problem.kind !== "formula_column") {
+      await store.pauseTracker(
+        first.tracker.id,
+        problem.reason,
+        problem.kind,
+        problem.dedupeKey,
+        problem.detail,
+      );
+      logEvent("push.paused", {
+        job: "push",
+        tracker: first.tracker.id,
+        kind: problem.kind,
+      });
+      return;
+    }
     const writable = new Set(structure.headers.map((h) => h.normalised));
     for (const blocked of [
       ...structure.formulaColumns,

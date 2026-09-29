@@ -65,39 +65,21 @@ Do not connect Supabase's GitHub integration with automatic migrations: migratio
 
 ### 2.3 Vercel
 
-1. Project Settings > Environment Variables, for **Production** (PRD 18.1):
+`vercel.json` already runs the app in Mumbai (`bom1`, next to the database) and builds only `main` (other branches would share the production database, PRD 18.3).
 
-   | Name | Value |
-   | --- | --- |
-   | `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL |
-   | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | anon or publishable key |
-   | `SUPABASE_SERVICE_ROLE_KEY` | service role or secret key (server only) |
-   | `GOOGLE_SERVICE_ACCOUNT_JSON` | the base64 line from 2.1 step 3 |
-   | `KNIT_DRIVE_FOLDER_ID` | from 2.1 step 4 |
-   | `KNIT_ARCHIVE_SHEET_ID` | from 2.1 step 6 |
-   | `KNIT_CRON_SECRET` | a new random string of at least 32 characters, for example the output of `openssl rand -hex 32` |
-   | `APP_URL` | the production URL, `https://<app>.vercel.app` |
-   | `ENABLE_EXPERIMENTAL_COREPACK` | `1` (Vercel then uses the pnpm version pinned in `package.json`) |
+1. Put the Supabase keys in `.env.local` (Project Settings > API Keys: the anon or publishable key as `NEXT_PUBLIC_SUPABASE_ANON_KEY`, the service role or secret key as `SUPABASE_SERVICE_ROLE_KEY`), next to the Google values from 2.1.
+2. Run `pnpm vercel:env https://<app>.vercel.app` (the address can be fixed later, step 5). It makes `KNIT_CRON_SECRET` once and keeps it in `.env.local`, and puts all nine production variables (PRD 18.1, plus `ENABLE_EXPERIMENTAL_COREPACK=1` so Vercel uses the pnpm version pinned in `package.json`) on the clipboard and in `.knit-local/vercel.env`. It prints names only.
+3. On vercel.com: Add New > Project > import the GitHub repository (install Vercel's GitHub app for that repository only). Framework: Next.js; leave the build settings as detected. Under Environment Variables, paste the block into the first Key field: Vercel splits it into nine variables. Leave `KNIT_SHEET_SOURCE` unset: production always uses Google (N16 refuses `local` there). Click Deploy.
+4. When the deploy finishes, note the address Vercel gave the project (Settings > Domains).
+5. If it differs from the one used in step 2, change `APP_URL` in Settings > Environment Variables and redeploy (Deployments > the latest > Redeploy).
 
-   Leave `KNIT_SHEET_SOURCE` unset: production always uses Google (N16 refuses `local` there).
-2. Project Settings > Functions: set the region to **Mumbai (bom1)**, next to the database.
-   - Function time limit (PRD 7.3): every job call works for 80% of its function's `maxDuration` and leaves the rest to the next call. Knit ships with `maxDuration = 60` seconds, which every plan allows. To give each call the plan's allowed maximum (for example 300 seconds with Fluid compute on, which new projects have by default), change the value in all six places together, then deploy and run `cron.sql` again (2.4):
-     - `export const maxDuration = 60;` in `app/api/jobs/pull/route.ts`, `app/api/jobs/push/route.ts`, `app/api/jobs/close/route.ts`, `app/api/jobs/structure/route.ts` and `app/(app)/layout.tsx` (Sync now);
-     - `timeout_milliseconds := 60000` in `supabase/sql/cron.sql` (the value in milliseconds).
+- Function time limit (PRD 7.3): every job call works for 80% of its function's `maxDuration` and leaves the rest to the next call. Knit ships with `maxDuration = 60` seconds, which every plan allows. To give each call the plan's allowed maximum (for example 300 seconds with Fluid compute on, which new projects have by default), change the value in all six places together, then deploy and run `cron.sql` again (2.4):
+  - `export const maxDuration = 60;` in `app/api/jobs/pull/route.ts`, `app/api/jobs/push/route.ts`, `app/api/jobs/close/route.ts`, `app/api/jobs/structure/route.ts` and `app/(app)/layout.tsx` (Sync now);
+  - `timeout_milliseconds := 60000` in `supabase/sql/cron.sql` (the value in milliseconds).
 
-     A value above the plan's limit makes the deploy fail: check Project Settings > Functions first.
-3. Build only `main`: Project Settings > Git > Ignored Build Step, choose "Custom" and enter
-
-   ```bash
-   [ "$VERCEL_GIT_COMMIT_REF" != "main" ]
-   ```
-
-   (it skips every branch except `main`). Then turn deployments on: `vercel.json` keeps them off until now with `"git": {"deploymentEnabled": false}`; delete that `git` entry and push to `main`.
-4. Deploy `main` (the push above, or Deployments > Redeploy).
+  A value above the plan's limit makes the deploy fail: check Project Settings > Functions first.
 
 Check: `https://<app>.vercel.app/api/health` answers `{"ok":true,"db":true,...}`. If the deployment fails at start with "Knit cannot start: environment variables are missing or invalid", the message names each missing variable (never its value): fix it and redeploy.
-
-Preview deployments stay off: they would share the production database (PRD 18.3).
 
 ### 2.4 Jobs (PRD 18.2)
 
@@ -130,7 +112,7 @@ Check: sign in at `https://<app>.vercel.app/login`.
 
 - [ ] Google: APIs on, service account key made, folder and archive shared as Editor, key file deleted
 - [ ] Supabase: sign-ups off, Site URL set, `pg_cron` and `pg_net` on, `db push` done, calendar has 730 days
-- [ ] Vercel: nine variables set for Production, region Mumbai, only `main` builds, deployments turned on, `maxDuration` checked against the plan (2.3)
+- [ ] Vercel: project imported with the nine variables from `pnpm vercel:env`, `APP_URL` matching the real address, `maxDuration` checked against the plan (2.3)
 - [ ] `/api/health` is ok
 - [ ] `cron.sql` run with the real URL and secret; `net._http_response` shows status 200
 - [ ] Admin bootstrapped and signed in; Sync health lists `discover` runs

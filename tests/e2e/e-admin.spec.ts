@@ -210,6 +210,24 @@ test("the other admin screens", async ({ page }, info) => {
   await shoot("admin-holidays");
 });
 
+test("native dropdowns follow a dark system theme", async ({ page }) => {
+  // Without it, Chrome on Windows opened the list white with light, unreadable options.
+  await page.emulateMedia({ colorScheme: "dark" });
+  await page.goto("/admin/people");
+  const styles = await page.locator("select#role").evaluate((select) => {
+    const option = getComputedStyle(select.querySelector("option")!);
+    return {
+      scheme: getComputedStyle(select).colorScheme,
+      background: option.backgroundColor,
+      color: option.color,
+    };
+  });
+  expect(styles.scheme).toBe("dark");
+  for (const unset of ["rgb(255, 255, 255)", "rgba(0, 0, 0, 0)"])
+    expect(styles.background).not.toBe(unset);
+  expect(styles.background).not.toBe(styles.color);
+});
+
 test.describe("a member", () => {
   test.use({ storageState: STATE.member });
 

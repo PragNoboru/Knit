@@ -58,6 +58,8 @@
 }
 
 :root {
+  /* Native controls (dropdown lists, date pickers, checkboxes) follow the page's theme. */
+  color-scheme: light;
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
@@ -104,6 +106,7 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
+    color-scheme: dark;
     --background: oklch(0.145 0 0);
     --foreground: oklch(0.985 0 0);
     --card: oklch(0.205 0 0);
@@ -155,6 +158,11 @@
   }
   html {
     @apply font-sans;
+  }
+  /* A native dropdown list draws its options with their own colours, not the select's. */
+  option,
+  optgroup {
+    @apply bg-popover text-popover-foreground;
   }
 }
 

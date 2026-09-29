@@ -166,8 +166,11 @@ test("the other admin screens", async ({ page }, info) => {
 
   await page.goto("/admin/sync");
   await expect(page.getByRole("region", { name: "Write-backs" })).toBeVisible();
+  // The closed day's own cell: on a real Tue 29 Sep the run times also start with the date.
   await expect(
-    page.getByRole("region", { name: "Day closes" }).getByText("Tue 29 Sep"),
+    page
+      .getByRole("region", { name: "Day closes" })
+      .getByRole("cell", { name: "Tue 29 Sep", exact: true }),
   ).toBeVisible();
   await shoot("admin-sync");
 

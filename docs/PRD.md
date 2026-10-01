@@ -760,7 +760,7 @@ Editing a live tracker's mapping later: the same screens; saving runs a structur
 - Top bar: Knit wordmark, date, links (Today, Calendar, All Tasks, Admin), Sync now, user menu.
 - Tracker chips: one colour each from the palette `indigo, teal, amber, rose, violet, emerald, sky, orange`, always with the tracker name as text.
 - Status never relies on colour alone: every status has an icon and a label.
-- Neutral theme (white surfaces, near-black text, one accent). Light and dark follow the system. The palette can later be swapped for Noboru brand colours through CSS variables.
+- Noboru brand theme (decided 1 Oct 2026, replacing the neutral theme through the same CSS variables): white surfaces and near-black text (#212121) in light mode, near-black surfaces and near-white text in dark mode, and Noboru lime (#77cb35) as the one accent, with near-black text on lime fills. Where lime is too light to read on white (text, links, focus rings) a darker shade of the same green is used, so every pair meets WCAG AA (4.5:1 for text, 3:1 for focus rings and controls). Font: Poppins. The Noboru mark (a lime and a black triangle) sits beside the Knit wordmark and is the app icon; the product name stays Knit. Tracker colours (8-colour palette) and status colours stay distinct from the accent. Light and dark follow the system.
 - Under 640 px wide, table rows become stacked cards with the status control full width.
 - Keyboard: every control reachable; status dropdown operable with arrows and Enter; visible focus rings.
 

@@ -17,6 +17,11 @@ import { normaliseRow, type SheetRow } from "@/lib/domain/rows";
 // The first test pins that behaviour so the gap is on record; the second, an expected failure,
 // states the one thing any answer must give (no task-day before go-live). When the PRD decides,
 // replace both with the decided rule.
+//
+// The same gap applies to a backlog row brought forward before go-live (N61): its task-day sits
+// on the go-live date, but its due date is still before go-live, so when the sheet re-dates it
+// the 6.6 rules move the task-day before go-live again (to the new date when that is today or
+// later, else to today as a spillover with past_date_added). The second describe pins that.
 
 const read = <T>(name: string): T =>
   JSON.parse(
@@ -131,6 +136,49 @@ describe("a live task re-dated to before go-live (N42: open question, no PRD rul
 
   it.fails("wanted: no task-day lands before go-live", () => {
     const p = redatedBeforeGoLive();
+    const days = [
+      ...p.taskDayUpdates.flatMap((u) => (u.set.day ? [u.set.day] : [])),
+      ...p.taskDayInserts.map((d) => d.day),
+    ];
+    expect(days.filter((day) => day < GO_LIVE)).toEqual([]);
+  });
+});
+
+/** A backlog row brought forward before go-live (N61): due Tue 29 Sep, its task-day on go-live. */
+function broughtTask(id: string): PlanTask {
+  const task = liveTask(id);
+  const r = normalise(row(id, "Tue 29 Sep"));
+  return {
+    ...task,
+    plannedRaw: r.plannedRaw,
+    plannedStart: "2026-09-29",
+    dueDate: "2026-09-29",
+    sourceSnapshot: r.snapshot,
+    taskDays: [{ ...task.taskDays[0]!, spillIndex: 1, origin: "backlog" }],
+  };
+}
+
+/** The sheet moves the brought task from Tue 29 Sep to Mon 28 Sep, still before go-live. */
+const broughtRedated = () =>
+  planPull([broughtTask("b")], [normalise(row("b", "Mon 28 Sep"))], {
+    trackerId: "tracker-1",
+    goLiveDate: GO_LIVE,
+    today: TODAY,
+    config,
+  });
+
+describe("a brought backlog task re-dated before go-live (N61, N42: open question)", () => {
+  it("today: its task-day moves from go-live to today as a spillover", () => {
+    const p = broughtRedated();
+    expect(p.taskUpdates[0]!.set).toMatchObject({ dueDate: "2026-09-28" });
+    expect(p.taskDayUpdates).toEqual([
+      { id: "td-1", set: { day: TODAY, origin: "spillover" } },
+    ]);
+    expect(p.attention.map((a) => a.kind)).toEqual(["past_date_added"]);
+  });
+
+  it.fails("wanted: no task-day lands before go-live", () => {
+    const p = broughtRedated();
     const days = [
       ...p.taskDayUpdates.flatMap((u) => (u.set.day ? [u.set.day] : [])),
       ...p.taskDayInserts.map((d) => d.day),

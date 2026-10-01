@@ -143,10 +143,12 @@ Knit never guesses: an unmapped status counts as Yet to Start (never Done), an u
 3. **Set up**, then follow the steps: tab, header row, columns, statuses, owners and policies, name/colour/go-live, preview, **Activate**.
    - Formula columns are read-only (N6): the status Knit writes must go to a plain column (for Noboru, the Done column).
    - Every status word must be mapped before activation.
-   - Go-live defaults to the next working day (N42): rows due before it, today's included, are history only (their Knit Note says Before Knit go-live), and open ones are listed in the backlog review. Pick another date at step 7 if needed.
+   - Go-live defaults to the next working day (N42): rows due before it, today's included, are history only (their Knit Note says Before Knit go-live), and open ones are listed in the backlog review. Pick another date at step 7 if needed, and make it a working day: Knit takes any date, and Bring to today (step 5) puts tasks on the go-live date even when it is an off day, which then closes as not done.
 4. Activation adds a hidden **Knit ID** column (protected with a warning) and a visible **Knit Note** column at the right of the tab, writes an ID on every row and pulls the tracker. Do not edit, sort into, or delete the Knit ID column.
 5. **Backlog review**: when old rows are still open, activation opens it straight away. Bring to today, Mark done, or Cancel with a reason. Rows left alone stay history only.
-   - Bring to today never puts a task before go-live (N61). While go-live is still ahead (with the default go-live, the next working day, it always is on activation day), it puts the task on the go-live day, and the review says so under Action. From the go-live day on it puts the task on today. Either way the task counts as spilled once (Spilled 1x), and the days before go-live close with no miss.
+   - Bring to today never puts a task before go-live itself (N61). While go-live is still ahead (with the default go-live, the next working day, it always is on activation day), it puts the task on the go-live day, and the review says so under Action. From the go-live day on it puts the task on today. Either way the task counts in Knit as spilled once (Spilled 1x), and the days before go-live close with no miss for it.
+   - Before go-live, leave the planned date of a brought row alone in the sheet. A new date there still moves the task: to that date when it is today or later, else to today. If that day is before go-live, it closes as not done.
+   - In the sheet, a brought row's Knit Note keeps saying Before Knit go-live until Knit next writes the row: a status change made in Knit, or the close of the day the task is on (for a task brought before go-live, the close of the go-live day). Knit's own screens show the task on its day.
    - Mark done and Cancel work the same on any day. You can come back later from the tracker page (**open rows before go-live**).
 
 To change a live tracker's mapping later: Admin > Trackers > the tracker > **Edit mapping**. Saving checks the tab and pulls again; history is never rewritten. Choosing another status column takes you to the statuses step: Knit keeps using the old column until the new column's words are mapped there.
@@ -167,7 +169,7 @@ To connect another tab of a spreadsheet that already has a tracker: **Set up ano
    ```
 
    The reset keeps the Vault secrets but drops the jobs. Then run `cron.sql` again (2.4, it is safe to run again) and bootstrap the admin again (2.5).
-5. Connect each real tracker (section 4) and check that step 7 shows the agreed go-live date (connected the evening before, it does). Review each backlog right after activation or later from the tracker page: Bring to today puts tasks on the go-live day while it is still ahead (N61), so nothing lands on a day before go-live.
+5. Connect each real tracker (section 4) and check that step 7 shows the agreed go-live date (connected the evening before, it does). Review each backlog right after activation or later from the tracker page: Bring to today puts tasks on the go-live day while it is still ahead (N61), not on the day you use it. Until go-live, leave the planned dates of brought rows alone in the sheet (section 4, step 5).
 
 ## 6. Rotate secrets
 

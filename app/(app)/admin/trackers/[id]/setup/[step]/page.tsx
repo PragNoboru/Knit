@@ -31,12 +31,17 @@ export default async function SetupStepPage({
   if (!tracker || !known || tracker.state === "archived") notFound();
   if (step === "activate" && tracker.state !== "draft") notFound();
   const current = known.step as Exclude<WizardStep, "tab">;
+  // 11.1, N68: the standard setup was just applied. A fixed flag; the words left are worked out
+  // from the tab, never read from the URL.
+  const standard =
+    tracker.state === "draft" && firstParam(query, "standard") === "applied";
   const body = {
     header: <HeaderStep tracker={tracker} />,
     columns: <ColumnsStep tracker={tracker} />,
     statuses: (
       <StatusesStep
         tracker={tracker}
+        standard={standard}
         pending={
           // 11: a live tracker's new status columns, saved with this step (saveColumns).
           tracker.state !== "draft" && firstParam(query, "statusRead")
@@ -48,7 +53,7 @@ export default async function SetupStepPage({
         }
       />
     ),
-    owners: <OwnersStep tracker={tracker} />,
+    owners: <OwnersStep tracker={tracker} standard={standard} />,
     details: <DetailsStep tracker={tracker} />,
     preview: <PreviewStep tracker={tracker} />,
     activate: <ActivateStep tracker={tracker} />,

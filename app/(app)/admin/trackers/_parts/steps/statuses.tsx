@@ -9,6 +9,12 @@ import {
 import { saveStatuses } from "@/lib/actions/admin";
 import { loadTabData, type AdminTracker } from "@/lib/admin/data";
 import { normaliseKey, USER_STATUSES } from "@/lib/domain/config";
+import {
+  matchStandardTemplate,
+  standardNotOffered,
+  standardStatusesLeft,
+  standardWordsLeft,
+} from "@/lib/domain/standard-template";
 import { STATUS_LABELS } from "@/lib/domain/status";
 import {
   CLEAR_CELL,
@@ -28,9 +34,12 @@ import {
 export async function StatusesStep({
   tracker,
   pending = null,
+  standard = false,
 }: {
   tracker: AdminTracker;
   pending?: { statusRead: string; statusWrite: string } | null;
+  /** 11.1, N69: opened by Use the standard setup with words or write-backs left. */
+  standard?: boolean;
 }) {
   const { headerRow, columns } = tracker.draft;
   if (!headerRow || !columns?.statusRead)
@@ -54,15 +63,36 @@ export async function StatusesStep({
   const dropdown = (header: string) =>
     structure.validations[normaliseKey(header)]?.options ?? null;
   const validation = structure.validations[normaliseKey(statusHeader)];
-  const choices = statusChoices(rows, statusHeader, dropdown(statusHeader));
+  const map = tracker.draft.statusMap ?? {};
+  // N69 (amends N19 a): a mapped blank is listed even when no row is blank, so it is kept.
+  const choices = statusChoices(rows, statusHeader, dropdown(statusHeader), {
+    mappedBlank: !switching && map[""] !== undefined,
+  });
   const words = writeBackOptions(
     rows,
     writeHeader,
     writeHeader ? dropdown(writeHeader) : null,
   );
-  const map = tracker.draft.statusMap ?? {};
   const writeBack = tracker.draft.writeBack ?? {};
   const canWrite = writeHeader !== null;
+  // 11.1, N69: after the standard setup, say what it left, worked out from the tab and draft.
+  const template =
+    standard && !switching ? matchStandardTemplate(structure)?.template : null;
+  const left = template
+    ? standardStatusesLeft(template, choices, map, words, writeBack)
+    : null;
+  const notices = left
+    ? [
+        left.wordsToMap.length > 0 ? standardWordsLeft(left.wordsToMap) : null,
+        left.notOffered.length > 0
+          ? standardNotOffered(
+              statusHeader,
+              left.notOffered,
+              left.writeBacksToChoose,
+            )
+          : null,
+      ].filter((notice): notice is string => notice !== null)
+    : [];
   const writeDefault = (status: (typeof USER_STATUSES)[number]) => {
     const value = writeBack[status];
     if (value === undefined) return canWrite ? "" : LEAVE_UNCHANGED;
@@ -91,6 +121,11 @@ export async function StatusesStep({
           />
         </>
       ) : null}
+      {notices.map((notice) => (
+        <p key={notice} role="status" className="text-sm">
+          {notice}
+        </p>
+      ))}
       {tracker.state !== "draft" && !switching ? (
         // PRD 11, N28: a remap reaches only new rows and rows that change to the word.
         <p className="text-sm text-muted-foreground">{STATUSES_LIVE_HINT}</p>

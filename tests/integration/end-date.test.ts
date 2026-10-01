@@ -7,16 +7,18 @@ import {
   type MemoryFile,
 } from "@/lib/sheets/memory";
 import type { TabRef } from "@/lib/sheets/types";
+import { loadXlsxFile } from "@/lib/sheets/xlsx";
 import { pullTracker } from "@/lib/sync/pull";
 import { pushDue } from "@/lib/sync/push";
 import { toSheetsSerial } from "@/lib/time";
 
-import { createUser } from "./support/builders";
+import { createUser, fixtureTrackerConfig } from "./support/builders";
 import { queryAs, setToday, useTestDb, type Db } from "./support/db";
 import { storeFor } from "./support/store";
 
 // PRD 6.3.4, 6.6, N64 to N67: a tracker with an End date column, pulled and pushed against the
-// real SQL. No database change was needed: windows already have planned_end and date_kind.
+// real SQL, and the Knit Standard Tracker v1 example (11.1). No database change was needed:
+// windows already have planned_end and date_kind.
 
 const TODAY = "2026-09-30"; // Wed
 const GO_LIVE = "2026-09-28";
@@ -346,5 +348,71 @@ describe("a tracker with an End date column (6.3.4)", () => {
     expect(after[headers.indexOf("End date")]).toEqual(
       before[headers.indexOf("End date")],
     );
+  });
+});
+
+describe("the Knit Standard Tracker v1 example (11.1)", () => {
+  const db = useTestDb();
+
+  it("pulls with the standard setup's registry, and a second pull changes nothing", async () => {
+    await setToday(db(), TODAY);
+    const file = loadXlsxFile(
+      "fixtures/trackers/Knit_Standard_Tracker_v1_example.xlsx",
+    );
+    const source = new MemorySheetSource([file]);
+    const me = await createUser(db(), { role: "admin", name: "Pragaman" });
+    await db().query(
+      "insert into people_aliases (alias_norm, display, user_id) values ('pragaman', 'Pragaman', $1), ('creative', 'Creative', null)",
+      [me],
+    );
+    await source.ensureKnitColumns({ fileId: file.id, sheetId: 0 }, 1);
+    await db().query(
+      `insert into drive_files (file_id, name, mime_type, state) values ($1, $2, 'application/vnd.google-apps.spreadsheet', 'connected')`,
+      [file.id, file.name],
+    );
+    const [tracker] = await db().query<{ id: string }>(
+      `insert into trackers (file_id, sheet_gid, tab_name, name, color, state, config, go_live_date)
+       values ($1, 0, 'Tasks', 'Knit Standard · Example', 'teal', 'active', $2::jsonb, $3) returning id`,
+      [
+        file.id,
+        JSON.stringify(fixtureTrackerConfig("Knit Standard · Example")),
+        "2026-10-01",
+      ],
+    );
+    const pull = async () => {
+      const store = storeFor(db());
+      const [synced] = await store.trackers({ ids: [tracker!.id] });
+      return pullTracker({ store, source }, synced!, { force: true });
+    };
+    expect(await pull()).toMatchObject({
+      outcome: "pulled",
+      stats: { rows: 10, inserted: 10 },
+    });
+    const [counts] = await db().query(
+      `select count(*) filter (where date_kind = 'window')::int as windows,
+              count(*) filter (where history_only)::int as history,
+              count(*) filter (where critical)::int as critical
+       from tasks`,
+    );
+    expect(counts).toEqual({ windows: 4, history: 2, critical: 2 });
+    const [subtitle] = await db().query(
+      "select subtitle, planned_raw from tasks where source_ref = 'FBG-04'",
+    );
+    expect(subtitle).toEqual({
+      subtitle: "FBG-04 · Ads · Brief ready",
+      planned_raw: "Mon 5 Oct 2026 to Fri 9 Oct 2026",
+    });
+
+    const snapshot = () =>
+      db().query(
+        `select (select jsonb_agg(to_jsonb(k) - 'updated_at' - 'source_synced_at' order by id) from tasks k) as tasks,
+                (select jsonb_agg(to_jsonb(d) order by d.id) from task_days d) as days,
+                (select count(*)::int from events) as events`,
+      );
+    const before = await snapshot();
+    expect(await pull()).toMatchObject({
+      stats: { inserted: 0, updated: 0, removed: 0 },
+    });
+    expect(await snapshot()).toEqual(before);
   });
 });

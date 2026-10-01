@@ -44,6 +44,10 @@ test("the wizard connects a new sheet end to end", async ({ page }, info) => {
   // Step 3: the suggested header row.
   await expect(page).toHaveURL(/\/setup\/header$/);
   await expect(page.getByText("Knit suggests row 1.")).toBeVisible();
+  // 11.1, N68: Noboru's columns are not the standard template's, so nothing is offered.
+  await expect(
+    page.getByRole("button", { name: "Use the standard setup" }),
+  ).toHaveCount(0);
   await page.getByRole("button", { name: "Save and continue" }).click();
 
   // Step 4: columns. The Status column holds formulas, so it cannot be a write target.

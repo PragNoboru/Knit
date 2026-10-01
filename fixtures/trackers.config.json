@@ -1,5 +1,5 @@
 {
-  "notes": "Registry configs for the four example trackers, as the setup wizard would save them. Used as test fixtures and as starting configs. Headers are matched after trim + lowercase + whitespace collapse. Status keys are normalised the same way. A writeBack value of null means 'never write this status to the sheet; show it only in the Knit Note'. An empty string means 'clear the cell'. Items in statusMapPending must be completed in the wizard from the live sheet's dropdown rule before activation.",
+  "notes": "Registry configs for the four real example trackers, and for Knit_Standard_Tracker_v1_example, an example in the Knit Standard Tracker v1 layout (PRD 11.1) that is not a real tracker, as the setup wizard would save them (the standard example exactly as Use the standard setup saves it). Used as test fixtures and as starting configs. Headers are matched after trim + lowercase + whitespace collapse. Status keys are normalised the same way. A writeBack value of null means 'never write this status to the sheet; show it only in the Knit Note'. An empty string means 'clear the cell'. Items in statusMapPending must be completed in the wizard from the live sheet's dropdown rule before activation.",
   "referenceToday": "2026-09-25",
   "people": [
     {
@@ -367,6 +367,80 @@
             "dueDay": "Sat"
           }
         ],
+        "unmappedStatuses": []
+      }
+    },
+    {
+      "fixture": "fixtures/trackers/Knit_Standard_Tracker_v1_example.xlsx",
+      "tab": "Tasks",
+      "name": "Knit Standard · Example",
+      "color": "teal",
+      "phase": 2,
+      "headerRow": 1,
+      "columns": {
+        "date": "Date",
+        "endDate": "End date",
+        "title": "Task",
+        "statusRead": "Status",
+        "statusWrite": "Status",
+        "completedOn": "Done on",
+        "owner": "Owner",
+        "sourceRef": "Task ID",
+        "critical": {
+          "header": "Priority",
+          "truthy": [
+            "High"
+          ]
+        }
+      },
+      "readOnlyColumns": [],
+      "titleTemplate": "{Task}",
+      "subtitleTemplate": "{Task ID} · {Workstream} · {Stage}",
+      "detailColumns": [
+        "Details / done when",
+        "Workstream",
+        "Stage",
+        "Priority",
+        "Depends on",
+        "Link",
+        "Notes"
+      ],
+      "ownerSeparators": [
+        ","
+      ],
+      "ownerFilter": "mine",
+      "offDayPolicy": "previous_working_day",
+      "statusMap": {
+        "": "yet_to_start",
+        "not started": "yet_to_start",
+        "in progress": "in_progress",
+        "blocked": "blocked",
+        "done": "done",
+        "cancelled": "cancelled"
+      },
+      "cancelReasons": {},
+      "writeBack": {
+        "yet_to_start": "Not started",
+        "in_progress": "In progress",
+        "blocked": "Blocked",
+        "done": "Done",
+        "cancelled": "Cancelled"
+      },
+      "completedOnFormat": {
+        "type": "date"
+      },
+      "expected": {
+        "rows": 10,
+        "myRows": 9,
+        "notMine": {
+          "Creative": 1
+        },
+        "kinds": {
+          "single": 6,
+          "window": 4
+        },
+        "offDayRows": 2,
+        "formulaColumns": [],
         "unmappedStatuses": []
       }
     }

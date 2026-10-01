@@ -210,12 +210,15 @@ export interface StatusChoice {
 
 /**
  * 11 step 5, 6.8: every value of the status column's dropdown plus every distinct value found
- * (a blank cell included), each with its count.
+ * (a blank cell included), each with its count. N69 (amends N19 a): with `mappedBlank`, a
+ * blank cell is listed (count 0) also when no row is blank, so saving the step again keeps a
+ * status map's blank mapping.
  */
 export function statusChoices(
   rows: readonly SheetRow[],
   statusHeader: string,
   dropdown: readonly string[] | null,
+  options: { mappedBlank?: boolean } = {},
 ): StatusChoice[] {
   const choices = new Map<string, StatusChoice>();
   const add = (word: string, count: number, inDropdown: boolean) => {
@@ -228,6 +231,7 @@ export function statusChoices(
   };
   for (const option of dropdown ?? []) add(option, 0, true);
   for (const row of rows) add(textOf(cellOf(row, statusHeader)), 1, false);
+  if (options.mappedBlank) add("", 0, false);
   return [...choices.values()].sort(
     (a, b) =>
       Number(b.inDropdown) - Number(a.inDropdown) ||

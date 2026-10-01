@@ -144,6 +144,8 @@ Knit never guesses: an unmapped status counts as Yet to Start (never Done), an u
    - Formula columns are read-only (N6): the status Knit writes must go to a plain column (for Noboru, the Done column).
    - Every status word must be mapped before activation.
    - Go-live defaults to the next working day (N42): rows due before it, today's included, are history only (their Knit Note says Before Knit go-live), and open ones are listed in the backlog review. Pick another date at step 7 if needed. Knit takes any date; when go-live is an off day, Bring to today (step 5) puts tasks on the working day after it.
+   - Standard setup (PRD 11.1): for a tab made from the Knit Standard Tracker v1 (row 1 holds its 14 headers in order, brand columns only after Notes), the header row step offers **Use the standard setup**. It fills the columns, statuses and write-back words and opens Owners and policies: link or mark each unknown owner name, then check name, colour, go-live, preview and activate. Every step can still be changed. If the Status column has a word outside Not started, In progress, Blocked, Done and Cancelled, it opens Map statuses instead: map that word first. No button means a header was renamed, moved, doubled or left off row 1, or Status or Done on holds formulas: fix the sheet, or set it up step by step.
+   - End date (N64): map it at step 4 when the tab has one. Date is the first day and End date the last; a blank End date is a one-day task. A multi-day task shows under Ongoing until its last working day, when it is due. An End date before its Date, or one Knit cannot read, shows in Needs Attention as Date cannot be read, and the task keeps its last good dates.
 4. Activation adds a hidden **Knit ID** column (protected with a warning) and a visible **Knit Note** column at the right of the tab, writes an ID on every row and pulls the tracker. Do not edit, sort into, or delete the Knit ID column.
 5. **Backlog review**: when old rows are still open, activation opens it straight away. Bring to today, Mark done, or Cancel with a reason. Rows left alone stay history only.
    - Bring to today puts the task on the first working day on or after go-live or today, whichever is later (N61): never before go-live and never on an off day. While go-live is still ahead (with the default go-live, the next working day, it always is on activation day), that is the go-live day, or the working day after it when go-live is an off day. From the go-live day on it is today, or the next working day when today is an off day. When that day is not today, the review names it under Action. Either way the task counts in Knit as spilled once (Spilled 1x), and the days before it close with no miss for it.
@@ -154,6 +156,8 @@ Knit never guesses: an unmapped status counts as Yet to Start (never Done), an u
 
 To change a live tracker's mapping later: Admin > Trackers > the tracker > **Edit mapping**. Saving checks the tab and pulls again; history is never rewritten. Choosing another status column takes you to the statuses step: Knit keeps using the old column until the new column's words are mapped there.
 
+Mapping or unmapping End date on a live tracker moves open tasks to their new due dates on the next pull (to today as a spillover when that day has passed); closed days are not changed. A tracker set up with the standard setup reads all 14 standard columns: renaming, deleting or doubling any of them pauses it until restored and resumed.
+
 Giving a word another Knit status changes only new rows and rows that change to it after you save; tasks already showing the word keep their status. A word mapped for the first time applies to every row that shows it, except tasks changed in Knit meanwhile: those keep their status, with a conflict when the word now means another one.
 
 To connect another tab of a spreadsheet that already has a tracker: **Set up another tab** on the Trackers list or on the tracker's page.
@@ -162,7 +166,7 @@ To connect another tab of a spreadsheet that already has a tracker: **Set up ano
 
 1. Agree the go-live date. The evening before, check Needs Attention is empty and Sync health shows yesterday closed.
 2. Archive the test trackers: Admin > Trackers > each tracker > **Archive**.
-3. Move the test copies out of the Knit folder; move the real trackers in (as native Google Sheets).
+3. Move the test copies out of the Knit folder; move the real trackers in (as native Google Sheets). From Phase 2 go-live every brand's tracker is a copy of the blank Knit Standard Tracker v1, never a copy of another live tracker (its hidden Knit IDs would come along). Keep the 14 headers in row 1 as they are (never rename, delete or double one), add brand columns only after Notes, and keep the Status dropdown to its five words.
 4. Reset the database for a clean start. This deletes every task, user and setting and applies the migrations again; the sheets are not touched and the Knit Archive keeps the test period's history:
 
    ```bash
@@ -170,7 +174,7 @@ To connect another tab of a spreadsheet that already has a tracker: **Set up ano
    ```
 
    The reset keeps the Vault secrets but drops the jobs. Then run `cron.sql` again (2.4, it is safe to run again) and bootstrap the admin again (2.5).
-5. Connect each real tracker (section 4) and check that step 7 shows the agreed go-live date (connected the evening before, it does). Review each backlog right after activation or later from the tracker page: while go-live is still ahead, Bring to today puts tasks on the go-live day (the working day after it if go-live is an off day), not on the day you use it, and refreshes their Knit Note in the sheet (N61, N63). Until go-live, leave the planned dates of brought rows alone in the sheet (section 4, step 5, PRD Q8).
+5. Connect each real tracker (section 4): use **Use the standard setup** at step 3, and save the agreed go-live date at step 7 (connected the evening before, the default is that date). Review each backlog right after activation or later from the tracker page: while go-live is still ahead, Bring to today puts tasks on the go-live day (the working day after it if go-live is an off day), not on the day you use it, and refreshes their Knit Note in the sheet (N61, N63). Until go-live, leave the planned dates of brought rows alone in the sheet (section 4, step 5, PRD Q8).
 
 ## 6. Rotate secrets
 

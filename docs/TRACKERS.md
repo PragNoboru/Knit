@@ -1,6 +1,6 @@
 # Knit: The example trackers
 
-The four files in `fixtures/trackers/` are real examples supplied by Pragaman on 25 Sep 2026, for reference and testing only. Live trackers will be Google Sheets in the Knit folder. Each has a ready-made registry config in `fixtures/trackers.config.json`, including the numbers the fixture tests must reproduce.
+Four files in `fixtures/trackers/` are real examples supplied by Pragaman on 25 Sep 2026, for reference and testing only. A fifth, `Knit_Standard_Tracker_v1_example.xlsx`, is an example in the Knit Standard Tracker v1 layout (section 6): Pragaman's blank template with ten made-up rows, not a real tracker. Live trackers will be Google Sheets in the Knit folder. Each file has a ready-made registry config in `fixtures/trackers.config.json`, including the numbers the fixture tests must reproduce.
 
 The point of this document: the four trackers differ in ways that break naive sync. Every difference below is handled by configuration, not by tracker-specific code.
 
@@ -71,11 +71,44 @@ Same columns and quirks as Google Ads. Differences:
 ## 5. Auxman (arriving 2 or 3 Oct 2026)
 Not yet seen. It is connected through the wizard in Phase 2. If it is one task per row with a date column, no code is needed. If it is a grid with dates across columns, that is a change request (SOW assumption 2).
 
+## 6. Knit Standard Tracker v1 (from Phase 2 go-live, 13 Oct 2026)
+From Phase 2 go-live every brand's tracker is a copy of Pragaman's blank template, the Knit Standard Tracker v1, made from the blank template and never from another live tracker (its hidden Knit IDs would come along). The wizard sets it up in one go with **Use the standard setup** (PRD 11.1, N68 to N70).
+
+**Tabs:** Tasks (the only tab Knit reads), Summary (counts by formula), Lists (the dropdown options), Guide (the rules, for people).
+
+**Columns (row 1, A to N, in this order):** Task ID, Date, End date, Task, Details / done when, Workstream, Owner, Priority, Status, Stage, Done on, Depends on, Link, Notes. Brand columns may follow Notes; Knit adds Knit Note and the hidden Knit ID after them on activation.
+
+**How the standard setup maps it**
+
+| Setting | Value |
+| --- | --- |
+| Date, End date | `Date`, `End date` (6.3.4) |
+| Title, subtitle | `{Task}`; `{Task ID} · {Workstream} · {Stage}` |
+| Status read and write | `Status` |
+| Completed on | `Done on`, a real date |
+| Owner | `Owner`, comma separated |
+| Source ID | `Task ID` |
+| Critical flag | `Priority` = High |
+| Detail columns | Details / done when, Workstream, Stage, Priority, Depends on, Link, Notes |
+| Statuses | Not started, In progress, Blocked, Done, Cancelled, and a blank cell as Yet to Start |
+
+**Quirks**
+- A multi-day task has its first day in Date and its last in End date; a blank End date is a one-day task. Ongoing work gets an End date too: the day it is reviewed. Knit shows the task under Ongoing until its last working day, when it is due. A window ending on an off day can fall due before it starts (PRD Q9, open).
+- Text ranges ("1-6 Oct") in Date are not the template's way; with an End date filled they are refused as `start_not_single` (6.3.4).
+- `Done on` is a real date, written by Knit when a task is marked done in Knit. A Done row with a blank Done on counts as done today in Knit (6.6).
+- `Priority` High marks a task critical; Normal and Low still show in the drawer.
+- `Task ID` (FBG-21...) is the source ID, used to recreate the Knit ID column (14).
+- The Status dropdown reads `Lists!$A$2:$A$6`: the five words. Pipeline steps go in Stage, never in Status. A word typed outside the five is an unmapped status (6.8).
+- The preset maps all 14 headers, so renaming, deleting or doubling any of them, even Link or Notes, pauses the tracker until restored. Never insert columns between the standard ones.
+
+**The example file** (`Knit_Standard_Tracker_v1_example.xlsx`, tab Tasks, a brand column `Budget` after Notes): ten rows FBG-01 to FBG-10 with real dates from 28 Sep to 30 Nov 2026, using all five status words and one blank status. Expected with today 25 Sep 2026: 10 rows, 9 for Pragaman (FBG-08 belongs to Creative; FBG-06 also names Riya, who is not a Knit user), 6 single dates and 4 Date and End date windows, 2 rows on off days (FBG-06 ends Sun 18 Oct and is due Sat 17 Oct, a 3rd Saturday; FBG-07 ends Tue 20 Oct, Dussehra, and is due Mon 19 Oct), no formula columns, no unmapped statuses. It is made by `scripts/make-standard-fixture.ts` (dev only) from an .xlsx export of the blank template.
+
 ## Recommendations for keeping trackers Knit-friendly
 These are optional; Knit copes without them, but each one removes a source of Needs Attention items.
-1. Keep one header row and one task per row.
-2. Prefer real date cells. Text dates work if they include the weekday or the year.
-3. Give every status column a dropdown, so the wizard can map every option once.
-4. Keep a completed-on column where possible.
-5. Use consistent owner names; add each spelling as an alias in Knit.
-6. Never type in the Knit ID column; it is protected with a warning for this reason.
+1. Use the Knit Standard Tracker v1 for every new tracker (section 6).
+2. Keep one header row and one task per row.
+3. Prefer real date cells. Text dates work if they include the weekday or the year. A multi-day task uses End date rather than a text range.
+4. Give every status column a dropdown, so the wizard can map every option once.
+5. Keep a completed-on column where possible.
+6. Use consistent owner names; add each spelling as an alias in Knit.
+7. Never type in the Knit ID column; it is protected with a warning for this reason.

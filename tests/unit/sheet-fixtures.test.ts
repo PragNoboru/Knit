@@ -181,6 +181,19 @@ describe("dropdown rules (PRD 6.8, 11 step 5)", () => {
       expect(config.statusMap[normaliseKey(option)], option).toBeDefined();
   });
 
+  it("reads the Knit Standard Tracker v1 Status options from Lists!A2:A6, all of them mapped (11.1)", async () => {
+    const entry = registry.trackers.find(
+      (t) => t.name === "Knit Standard · Example",
+    )!;
+    const { config, structure } = await readTracker(entry);
+    expect(structure.validations.status).toEqual({
+      options: ["Not started", "In progress", "Blocked", "Done", "Cancelled"],
+      source: "Lists!$A$2:$A$6",
+    });
+    for (const option of structure.validations.status!.options!)
+      expect(config.statusMap[normaliseKey(option)], option).toBeDefined();
+  });
+
   it("reports a dropdown fed from a missing tab as unreadable, never guessed", async () => {
     const entry = registry.trackers.find(
       (t) => t.name === "Noboru · CA Campaign",

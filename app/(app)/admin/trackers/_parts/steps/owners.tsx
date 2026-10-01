@@ -11,11 +11,19 @@ import {
   loadPeople,
   type AdminTracker,
 } from "@/lib/admin/data";
+import { STANDARD_APPLIED_OWNERS } from "@/lib/domain/standard-template";
 import { unknownOwnerNames } from "@/lib/domain/wizard";
 
 // PRD 11 step 6, 6.7, N1, N3: owner separators, owner filter and off-day policy; owner names
 // Knit does not know are linked to a user or marked as non-users here.
-export async function OwnersStep({ tracker }: { tracker: AdminTracker }) {
+export async function OwnersStep({
+  tracker,
+  standard = false,
+}: {
+  tracker: AdminTracker;
+  /** 11.1: opened by Use the standard setup. */
+  standard?: boolean;
+}) {
   const [normalised, people] = await Promise.all([
     loadNormalisedRows(tracker),
     loadPeople(),
@@ -25,6 +33,11 @@ export async function OwnersStep({ tracker }: { tracker: AdminTracker }) {
 
   return (
     <div className="flex flex-col gap-5">
+      {standard ? (
+        <p role="status" className="text-sm">
+          {STANDARD_APPLIED_OWNERS}
+        </p>
+      ) : null}
       <Section title="Owners and policies">
         <ActionForm
           action={saveOwners.bind(null, tracker.id)}

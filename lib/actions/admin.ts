@@ -21,6 +21,14 @@ import {
   USER_STATUSES,
   type UserStatus,
 } from "@/lib/domain/config";
+import {
+  matchStandardTemplate,
+  STANDARD_NOT_DRAFT,
+  STANDARD_TEMPLATE_IDS,
+  STANDARD_TEMPLATES,
+  standardSetupDraft,
+  standardTabChanged,
+} from "@/lib/domain/standard-template";
 import { REASON_MAX_LENGTH } from "@/lib/domain/status";
 import {
   completedOnPatternProblem,
@@ -316,6 +324,54 @@ export async function saveHeaderRow(
 }
 
 /**
+ * 11.1, N68, N69: Use the standard setup, on the header row step of a draft. Row 1 of the tab
+ * is read again and matched (lib/domain/standard-template.ts); the draft is filled from the
+ * template and saved as the steps would save it. Then Owners and policies opens, or Map
+ * statuses when a word or a write-back value is left; nothing from the sheet goes in the URL.
+ */
+export async function applyStandardSetup(
+  trackerId: string,
+  templateId: string,
+  // ActionForm passes its state and the form; this action reads neither.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  _previous: FormState,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  _form: FormData,
+): Promise<FormState> {
+  const denied = await adminRefusal();
+  if (denied) return denied;
+  const parsed = z
+    .object({
+      trackerId: TrackerId,
+      templateId: z.enum(STANDARD_TEMPLATE_IDS as [string, ...string[]]),
+    })
+    .safeParse({ trackerId, templateId });
+  if (!parsed.success) return INVALID;
+  const tracker = await loadTracker(parsed.data.trackerId);
+  if (!tracker) return { error: "This tracker no longer exists." };
+  const template = STANDARD_TEMPLATES.find(
+    (t) => t.id === parsed.data.templateId,
+  )!;
+  if (tracker.state !== "draft") return { error: STANDARD_NOT_DRAFT };
+  const { structure, rows } = await loadTabData(tracker.ref, 1);
+  const match = matchStandardTemplate(structure);
+  if (!match || match.template.id !== template.id)
+    return { error: standardTabChanged(template) };
+  if (match.problem !== null) return { error: match.problem };
+  const status = match.headers[normaliseKey("Status")] ?? "Status";
+  const dropdown = structure.validations[normaliseKey(status)]?.options ?? null;
+  const { patch, next } = standardSetupDraft(
+    match,
+    structure,
+    statusChoices(rows, status, dropdown),
+    writeBackOptions(rows, status, dropdown),
+  );
+  const error = await saveDraft(tracker, patch);
+  if (error) return { error };
+  redirect(`/admin/trackers/${tracker.id}/setup/${next}?standard=applied`);
+}
+
+/**
  * 11 step 4. Write targets may not hold formulas (N6) or content (invariant 5), and a
  * completed-on text pattern must read back as the date it wrote (6.8). When the status
  * columns change, their words are mapped again (11 step 5): a draft's status map is cleared,
@@ -490,7 +546,10 @@ export async function saveStatuses(
     : (saved.statusWrite ?? null);
   const dropdown = (header: string) =>
     structure.validations[normaliseKey(header)]?.options ?? null;
-  const choices = statusChoices(rows, statusRead, dropdown(statusRead));
+  // N69: a blank mapped before (the standard setup maps one) stays listed, so it is kept.
+  const choices = statusChoices(rows, statusRead, dropdown(statusRead), {
+    mappedBlank: !pending && tracker.draft.statusMap?.[""] !== undefined,
+  });
   const statusMap: Record<string, UserStatus> = {};
   const cancelReasons: Record<string, string> = {};
   for (const choice of choices) {

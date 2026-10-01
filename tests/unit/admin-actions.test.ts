@@ -946,3 +946,131 @@ describe("holidays (N19 g, finding C6)", () => {
     expect(saved()).toEqual([]);
   });
 });
+
+// The standard example (11.1), for Use the standard setup.
+const STD = "Knit_Standard_Tracker_v1_example";
+const stdRef: TabRef = {
+  fileId: STD,
+  sheetId: (await source.listTabs(STD)).find((t) => t.title === "Tasks")!
+    .sheetId,
+};
+const stdStructure = await source.readStructure(stdRef, 1);
+const stdRows = await source.readRows(stdRef, 1);
+
+describe("Use the standard setup (11.1, N68, N69)", () => {
+  const TEMPLATE = "knit-standard-v1";
+  const apply = (trackerId = TRACKER_ID, templateId = TEMPLATE) =>
+    actions.applyStandardSetup(
+      trackerId,
+      templateId,
+      { error: null },
+      new FormData(),
+    );
+  const INVALID = {
+    error: "This is no longer valid. Reload the page and try again.",
+  };
+
+  beforeEach(() => {
+    fx.tracker = trackerWith("draft", { goLiveChosen: true });
+    fx.tab = { structure: stdStructure, rows: stdRows };
+  });
+
+  it("is refused to a signed-out caller, a member, bad arguments and a live tracker", async () => {
+    fx.user = null;
+    expect(await apply()).toEqual({
+      error: "Your session has ended. Sign in again.",
+    });
+    fx.user = { ...ADMIN, isAdmin: false };
+    expect(await apply()).toEqual({ error: "Only the admin can do this." });
+    fx.user = ADMIN;
+    expect(await apply("not-a-uuid")).toEqual(INVALID);
+    expect(await apply(TRACKER_ID, "knit-standard-v9")).toEqual(INVALID);
+    fx.tracker = trackerWith("active");
+    expect(await apply()).toEqual({
+      error: "Only a tracker being set up can use the standard setup.",
+    });
+    expect(savedConfigs()).toEqual([]);
+  });
+
+  it("fills the draft from the template and opens Owners and policies", async () => {
+    await expect(apply()).rejects.toThrow(
+      /^redirect:\/admin\/trackers\/[0-9a-f-]+\/setup\/owners\?standard=applied$/,
+    );
+    const [config] = savedConfigs();
+    const expected = TrackerConfig.parse(
+      registry.trackers.find((t) => t.name === "Knit Standard · Example"),
+    );
+    expect(config).toMatchObject({
+      headerRow: 1,
+      columns: expected.columns,
+      statusMap: expected.statusMap,
+      writeBack: expected.writeBack,
+      subtitleTemplate: expected.subtitleTemplate,
+      detailColumns: expected.detailColumns,
+      completedOnFormat: { type: "date" },
+      cancelReasons: {},
+      // Step 7's choice is not the preset's.
+      goLiveChosen: true,
+    });
+  });
+
+  it("opens Map statuses when a word is left, with no sheet word in the URL", async () => {
+    const rows = stdRows.map((row, i) =>
+      i === 0
+        ? {
+            ...row,
+            cells: {
+              ...row.cells,
+              status: { value: "Skipped", formatted: "Skipped" },
+            },
+          }
+        : row,
+    );
+    fx.tab = { structure: stdStructure, rows };
+    const error = await apply().catch((e: Error) => e);
+    expect(String(error)).toMatch(
+      /redirect:\/admin\/trackers\/[0-9a-f-]+\/setup\/statuses\?standard=applied$/,
+    );
+    expect(String(error)).not.toMatch(/skipped/i);
+    expect(savedConfigs()[0]?.statusMap?.skipped).toBeUndefined();
+  });
+
+  it("says so, and saves nothing, when row 1 no longer has the template's headers", async () => {
+    fx.tab = { structure, rows };
+    expect(await apply()).toEqual({
+      error:
+        "This tab no longer has the Knit Standard Tracker v1 columns in row 1. Set it up step by step.",
+    });
+    fx.tab = {
+      structure: { ...stdStructure, formulaColumns: ["done on"] },
+      rows: stdRows,
+    };
+    expect((await apply()).error).toMatch(/"Done on" holds formulas/);
+    expect(savedConfigs()).toEqual([]);
+  });
+
+  it("saving Map statuses again keeps the mapped blank though no row is blank (N69)", async () => {
+    const expected = TrackerConfig.parse(
+      registry.trackers.find((t) => t.name === "Knit Standard · Example"),
+    );
+    fx.tracker = trackerWith("draft", { ...expected });
+    const noBlank = stdRows.filter(
+      (row) => String(row.cells.status?.formatted ?? "") !== "",
+    );
+    fx.tab = { structure: stdStructure, rows: noBlank };
+    const form = new FormData();
+    for (const choice of statusChoices(
+      noBlank,
+      "Status",
+      stdStructure.validations.status?.options ?? null,
+      { mappedBlank: true },
+    ))
+      form.set(statusField(choice.key), expected.statusMap[choice.key]!);
+    for (const [status, value] of Object.entries(expected.writeBack))
+      form.set(`writeBack:${status}`, value!);
+    await expect(
+      actions.saveStatuses(TRACKER_ID, { error: null }, form),
+    ).rejects.toThrow(/redirect:/);
+    expect(savedConfigs()[0]?.statusMap?.[""]).toBe("yet_to_start");
+  });
+});

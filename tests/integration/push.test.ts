@@ -854,3 +854,31 @@ describe("push (PRD 10.4)", () => {
     expect(g02.cells["knit note"]!.formatted).toBe("");
   });
 });
+
+// N49, 6.10, invariant 8: every RPC that changes a tracker's tasks takes the tracker lock before
+// the task's. push_result's superseded-and-resent branch moves the tracker's state_version, so
+// it locks the tracker first too, then the task, then the write-back. Two transactions taking
+// these locks in opposite orders could deadlock; one connection cannot show that, so the
+// function's own lock statements are checked in order.
+describe("push_result lock order (N49)", () => {
+  const db = useTestDb();
+
+  it("locks the tracker, then the task, then the write-back, before moving state_version", async () => {
+    const [fn] = await db().query<{ src: string }>(
+      "select prosrc as src from pg_proc where proname = 'push_result' and pronamespace = 'public'::regnamespace",
+    );
+    const src = fn!.src;
+    const at = (pattern: RegExp) => {
+      const match = pattern.exec(src);
+      expect(match, String(pattern)).not.toBeNull();
+      return match!.index;
+    };
+    const tracker = at(/from trackers where id = v_tracker_id for update/);
+    const task = at(/from tasks where id = v_task_id for update/);
+    const outbox = at(/from outbox where id = p_outbox_id for update/);
+    const stateVersion = at(/update trackers set state_version/);
+    expect(tracker).toBeLessThan(task);
+    expect(task).toBeLessThan(outbox);
+    expect(outbox).toBeLessThan(stateVersion);
+  });
+});

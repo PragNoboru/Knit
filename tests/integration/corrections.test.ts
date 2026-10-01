@@ -605,6 +605,140 @@ describe("admin_correct_task_day (PRD 6.10)", () => {
       expect(await everything(taskId)).toEqual(before);
     });
 
+    it("refuses a non-final correction the same day, before the cancelled days close (N15)", async () => {
+      // Sat 3 Oct is cancelled by the correction but still unlocked: it is not an open day.
+      await setToday(db(), "2026-10-03");
+      await correct(
+        db(),
+        as(admin),
+        await taskDayId(db(), taskId, "2026-09-30"),
+        "done",
+        "Done on Wednesday",
+      );
+      const before = await everything(taskId);
+      await expect(
+        correct(
+          db(),
+          as(admin),
+          await taskDayId(db(), taskId, "2026-10-01"),
+          "in_progress",
+          "Reopen",
+        ),
+      ).rejects.toMatchObject({ message: "correction_would_orphan_task" });
+      expect(await everything(taskId)).toEqual(before);
+    });
+
+    it("refuses a non-final correction on an earlier day of a task finished today (N15)", async () => {
+      await setToday(db(), "2026-10-03");
+      await queryAs(db(), as(member), "select set_task_status($1, 'done')", [
+        taskId,
+      ]);
+      const before = await everything(taskId);
+      await expect(
+        correct(
+          db(),
+          as(admin),
+          await taskDayId(db(), taskId, "2026-10-01"),
+          "blocked",
+          "Was blocked",
+        ),
+      ).rejects.toMatchObject({ message: "correction_would_orphan_task" });
+      expect(await everything(taskId)).toEqual(before);
+    });
+
+    it("a member's Cancelled reason in a correction's words on a later day still marks the day the task ended", async () => {
+      await setToday(db(), "2026-10-03");
+      await queryAs(
+        db(),
+        as(member),
+        "select set_task_status($1, 'cancelled', $2)",
+        [taskId, "Closed by correction on Sat 3 Oct"],
+      );
+      await closeDays(db(), ["2026-10-03", "2026-10-04"], "2026-10-05");
+      const before = await everything(taskId);
+      // Sat 3 Oct is the day the task ended, so Thu 1 Oct is an earlier day.
+      await expect(
+        correct(
+          db(),
+          as(admin),
+          await taskDayId(db(), taskId, "2026-10-01"),
+          "in_progress",
+          "Still needed",
+        ),
+      ).rejects.toMatchObject({ message: "correction_would_orphan_task" });
+      expect(await everything(taskId)).toEqual(before);
+    });
+
+    it("a later day a correction cancelled and its close froze reopens in place, after the corrected day", async () => {
+      // Missed on Thu 1 Oct, then planned again for Fri 9 Oct.
+      const moved = await createTask(db(), {
+        trackerId,
+        assignees: [member],
+        dueDate: "2026-10-09",
+      });
+      await createTaskDay(db(), {
+        taskId: moved,
+        day: "2026-10-01",
+        status: "not_done",
+        locked: true,
+      });
+      await createTaskDay(db(), { taskId: moved, day: "2026-10-09" });
+      const thursday = await taskDayId(db(), moved, "2026-10-01");
+
+      await setToday(db(), "2026-10-03");
+      await correct(db(), as(admin), thursday, "done", "Done on Thursday");
+      await closeDays(db(), ["2026-10-03", "2026-10-04"], "2026-10-05");
+      expect(await taskDays(db(), moved)).toMatchObject([
+        { day: "2026-10-01", status: "done", locked: true },
+        {
+          day: "2026-10-09",
+          status: "cancelled",
+          reason: "Closed by correction on Sat 3 Oct",
+          locked: true,
+        },
+      ]);
+
+      await correct(db(), as(admin), thursday, "in_progress", "Wrong task");
+      expect(await taskDays(db(), moved)).toMatchObject([
+        { day: "2026-10-01", status: "in_progress", locked: true },
+        {
+          day: "2026-10-09",
+          status: "in_progress",
+          reason: null,
+          locked: false,
+          spill_index: 1,
+          origin: "planned",
+          status_changed_on: "2026-10-05",
+        },
+      ]);
+      const [friday] = await db().query(
+        "select locked_at from task_days where task_id = $1 and day = '2026-10-09'",
+        [moved],
+      );
+      expect(friday).toEqual({ locked_at: null });
+      expect(await taskRow(moved)).toEqual({
+        status: "in_progress",
+        status_reason: null,
+        completed_on: null,
+      });
+      expect((await corrections(moved)).slice(-2)).toEqual([
+        {
+          day: "2026-10-01",
+          old_value: "done",
+          new_value: "in_progress",
+          reason: "Wrong task",
+          actor_user_id: admin,
+        },
+        {
+          day: "2026-10-09",
+          old_value: "cancelled",
+          new_value: "in_progress",
+          reason: "Wrong task",
+          actor_user_id: admin,
+        },
+      ]);
+    });
+
     it("a member's own Cancelled reason in the same words does not hide the day the task ended", async () => {
       await setToday(db(), "2026-10-03");
       await queryAs(

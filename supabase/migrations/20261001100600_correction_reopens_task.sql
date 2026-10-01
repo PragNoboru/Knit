@@ -11,7 +11,9 @@
 --     no unlocked task-day with a non-final status. The corrected day must not itself be one a
 --     correction cancelled.
 --   * Any other non-final correction that would leave a dated task with no open task-day is
---     still refused (correction_would_orphan_task, N15).
+--     still refused (correction_would_orphan_task, N15). An open task-day is an unlocked one
+--     with a non-final status: a task-day done or cancelled today, or cancelled by a
+--     correction made today, does not count until its close.
 --   * Where the task reopens (6.10): when its last task-day (by day, any status) is on today or
 --     later (an early completion frozen by its close, 6.5, or a task-day a correction
 --     cancelled), that task-day reopens in place: unlocked, with the new status, its day and
@@ -138,9 +140,15 @@ begin
     raise exception 'task_removed_at_source';
   end if;
 
+  -- N15: an open task-day is an unlocked one with a non-final status. An unlocked task-day
+  -- done or cancelled today (or cancelled by a correction made today) is not open.
   if p_status not in ('done', 'cancelled')
      and v_task.date_kind is distinct from 'open'
-     and not exists (select 1 from task_days where task_id = v_task.id and not locked)
+     and not exists (
+       select 1 from task_days
+       where task_id = v_task.id
+         and not locked
+         and status in ('yet_to_start', 'in_progress', 'blocked'))
      and not v_reopen then
     raise exception 'correction_would_orphan_task';
   end if;

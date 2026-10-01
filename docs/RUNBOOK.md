@@ -193,7 +193,7 @@ To connect another tab of a spreadsheet that already has a tracker: **Set up ano
 | Dates look a day off | Tasks on the wrong day | Knit uses India time everywhere. In the SQL editor `select knit_today();` must show today's date in India. If it does not, report it: do not change the server's timezone. |
 | The calendar is about to end | Sync health warning, Needs Attention: Calendar ending | Admin > Holidays: add next year's holidays, then **Extend by a year**. |
 | A member reports a wrong past day | Needs Attention: Report from a member | Open the task, and in its drawer use **Request correction** on that day, with a reason. |
-| The sheet reopened a finished task | Needs Attention: Conflict "The sheet reopened a task Knit has closed" | Open the task, and in its drawer use **Request correction** on the day it ended (its last day, not counting days marked "Closed by correction"): pick the status the sheet shows, with a reason. Knit reopens it from today (from the next working day on a day off), writes that status back and resolves the item. |
+| The sheet reopened a finished task | Needs Attention: Conflict "The sheet reopened a task Knit has closed" | Open the task, and in its drawer use **Request correction** on the day it ended (its last day, not counting days marked "Closed by correction"): pick the status the sheet shows, with a reason. Knit reopens it on today (the next working day on a day off), or on its own later day when it was planned or set for a later day, writes that status back and resolves the item. |
 
 ## 8. Backups and history
 

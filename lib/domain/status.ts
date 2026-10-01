@@ -4,6 +4,7 @@ import {
   type TrackerConfig,
   type UserStatus,
 } from "./config";
+import type { SourceSnapshot } from "./rows";
 
 /** PRD 6.1: labels shown for each status. The UI always pairs them with an icon (12.2). */
 export const STATUS_LABELS: Record<KnitStatus, string> = {
@@ -52,6 +53,38 @@ export function mapSourceStatus(
     key,
     cancelReason:
       status === "cancelled" ? (config.cancelReasons[key] ?? null) : null,
+  };
+}
+
+/**
+ * N28: how the pull and the checks read a row's status word. While the row shows the word Knit
+ * last read or wrote (source_snapshot), it stands for the Knit status recorded with it, not
+ * for what the current status map says, so a remapped word changes no existing task. The
+ * current map applies to a word that differs from the snapshot, to a word recorded as unmapped
+ * (null, N60), and when there is no snapshot or it predates the recorded status. A held
+ * Cancelled takes its word's configured reason when there is one. Type-only import of rows.ts:
+ * rows.ts imports this module at runtime.
+ */
+export function heldSourceStatus(
+  read: SourceStatus,
+  snapshot: SourceSnapshot | null,
+  config: TrackerConfig,
+): SourceStatus {
+  if (
+    snapshot === null ||
+    snapshot.statusKey !== read.key ||
+    snapshot.status === undefined ||
+    snapshot.status === null
+  ) {
+    return read;
+  }
+  const status = snapshot.status;
+  return {
+    status,
+    mapped: true,
+    key: read.key,
+    cancelReason:
+      status === "cancelled" ? (config.cancelReasons[read.key] ?? null) : null,
   };
 }
 

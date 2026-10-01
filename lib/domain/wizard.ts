@@ -456,3 +456,10 @@ export const writeBackField = (status: UserStatus) => `writeBack:${status}`;
 /** Form values for "leave the cell unchanged" (N8) and "clear the cell" (6.8). */
 export const LEAVE_UNCHANGED = "__leave__";
 export const CLEAR_CELL = "__clear__";
+
+/**
+ * PRD 11 (Editing a live tracker's mapping later), N28, N60: shown on the statuses step of a
+ * live tracker, unless its status columns are being changed.
+ */
+export const STATUSES_LIVE_HINT =
+  "Giving a word another Knit status changes only rows that change to it from now on, and new rows. Tasks already showing the word keep their status. A word mapped for the first time applies to every row that shows it.";

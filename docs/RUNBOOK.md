@@ -140,6 +140,8 @@ Knit never guesses: an unmapped status counts as Yet to Start (never Done), an u
 
 To change a live tracker's mapping later: Admin > Trackers > the tracker > **Edit mapping**. Saving checks the tab and pulls again; history is never rewritten. Choosing another status column takes you to the statuses step: Knit keeps using the old column until the new column's words are mapped there.
 
+Giving a word another Knit status changes only new rows and rows that change to it after you save; tasks already showing the word keep their status. A word mapped for the first time applies to every row that shows it.
+
 To connect another tab of a spreadsheet that already has a tracker: **Set up another tab** on the Trackers list or on the tracker's page.
 
 ## 5. Go-live on the real trackers (SOW Phase 2)
@@ -181,7 +183,7 @@ To connect another tab of a spreadsheet that already has a tracker: **Set up ano
 | A sheet moved out of the Knit folder | Tracker paused: "Left the Knit folder" | Move it back, then Resume. If it left on purpose, Archive the tracker. |
 | A file that is not a Google Sheet | Admin > Trackers > Not Google Sheets | Open it and use File > Save as Google Sheets; remove the original from the folder. |
 | An invalid date | Needs Attention: Date cannot be read, with the row | Fix the cell in the sheet (a real date, or text like "Mon 28 Sep"). New rows wait until it is readable; existing tasks keep their last good dates. Dismiss once fixed. |
-| An unmapped status | Needs Attention: Unmapped status; its rows count as Yet to Start | **Map** it to a Knit status right there (or in Edit mapping). The tracker is pulled again. |
+| An unmapped status | Needs Attention: Unmapped status; its rows count as Yet to Start | **Map** it to a Knit status right there (or in Edit mapping). The tracker is pulled again (every row showing it takes the new status). |
 | An unknown owner | Needs Attention: Unknown owner (one item per name) | **Link** it to a user, or mark it Not a Knit user. The trackers are pulled again. |
 | A write refused (protected range) | Needs Attention: Write refused; the task shows "Not saved to sheet" | Give the service account edit rights on the status and completed-on columns (Data > Protect sheets and ranges), then **Retry** (or Sync health > Retry failed). |
 | A task's row deleted before its write | Needs Attention: Row not found | If the row was deleted on purpose, Dismiss: the next pull marks the task removed. If not, restore the row from Version history and Retry. |

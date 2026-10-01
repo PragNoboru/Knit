@@ -1,6 +1,10 @@
 import { normaliseKey } from "@/lib/domain/config";
 import { cellOf, textOf } from "@/lib/domain/rows";
-import { mapSourceStatus, writeBackFor } from "@/lib/domain/status";
+import {
+  heldSourceStatus,
+  mapSourceStatus,
+  writeBackFor,
+} from "@/lib/domain/status";
 import type { SheetSource } from "@/lib/sheets/types";
 import type { LocalDate } from "@/lib/time";
 
@@ -56,8 +60,9 @@ export interface CloseResult {
  * PRD 10.6: for every active tracker, Knit's status against the sheet's status cell, skipping
  * statuses whose write-back is null (N8). The cell agrees when it holds the write-back word,
  * or a word the tracker's statusMap reads as the same Knit status ("Skipped" is Cancelled,
- * Q4; Noboru "No" is Yet to Start and "Moved" is Cancelled, N5). Differences become conflict
- * items and are counted.
+ * Q4; Noboru "No" is Yet to Start and "Moved" is Cancelled, N5). A word the cell still shows
+ * as Knit last read or wrote it reads as the status recorded with it (N28, N34), so a remap
+ * alone raises no mismatch. Differences become conflict items and are counted.
  */
 export async function mismatchCheck(
   deps: { store: SyncStore; source: SheetSource },
@@ -94,7 +99,11 @@ export async function mismatchCheck(
       const actual = textOf(cellOf(row, statusCell));
       if (normaliseKey(actual) === normaliseKey(expected)) continue;
       if (readsSameCell) {
-        const read = mapSourceStatus(actual, config);
+        const read = heldSourceStatus(
+          mapSourceStatus(actual, config),
+          task.sourceSnapshot,
+          config,
+        );
         if (read.mapped && read.status === task.status) continue;
       }
       mismatches += 1;

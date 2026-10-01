@@ -4,9 +4,9 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import { TrackerConfig } from "@/lib/domain/config";
-import type { SheetRow } from "@/lib/domain/rows";
+import type { SheetRow, SourceSnapshot } from "@/lib/domain/rows";
 import type { CellWrite } from "@/lib/sheets/types";
-import { writtenSnapshot } from "@/lib/sync/push";
+import { cellsFor, writtenSnapshot } from "@/lib/sync/push";
 
 // PRD 10.3, 10.4 step 5, N23: what a verified write-back records as the sheet's last known
 // status. Only a status-read cell that holds Knit's own write is recorded.
@@ -67,5 +67,100 @@ describe("writtenSnapshot (PRD 10.3, N23)", () => {
         "status",
       ]),
     ).toEqual({ statusKey: "done", status: "done" });
+  });
+
+  it("records status null when the written word is not in the status map (N28)", () => {
+    const unmapped: SheetRow = {
+      rowNumber: 2,
+      cells: { status: text("Copy ready"), "knit note": text("") },
+    };
+    expect(writtenSnapshot(unmapped, cells("Status"), base, TODAY)).toEqual({
+      statusKey: "copy ready",
+      status: null,
+    });
+  });
+});
+
+describe("cellsFor: a revert clears Completed On only from a Done Knit read (N24, N28)", () => {
+  // "Done" remapped to In Progress since Knit last read the row.
+  const remapped = TrackerConfig.parse({
+    ...base,
+    statusMap: {
+      ...base.statusMap,
+      done: "in_progress",
+      "in progress": "done",
+    },
+  });
+  const revert = (
+    snapshot: SourceSnapshot,
+    config: TrackerConfig,
+  ): CellWrite[] =>
+    cellsFor(
+      {
+        outboxId: "1",
+        payload: { status_value: "Not started", completed_on: null },
+        attempts: 0,
+        tracker: { id: "t", fileId: "f", sheetGid: 0, config: {} },
+        task: {
+          id: "a",
+          status: "yet_to_start",
+          statusReason: null,
+          completedOn: null,
+          dueDate: "2026-09-28",
+          historyOnly: false,
+          sourceSnapshot: snapshot,
+        },
+        taskDays: [],
+      },
+      config,
+      2,
+      TODAY,
+    );
+  const clears = (written: CellWrite[]) =>
+    written.some(
+      (c) => c.header === base.columns.completedOn && c.value === "",
+    );
+
+  it("clears it when the recorded status is Done, though the word now maps to In Progress", () => {
+    expect(
+      clears(
+        revert(
+          { statusKey: "done", status: "done", completedOn: "2026-09-27" },
+          remapped,
+        ),
+      ),
+    ).toBe(true);
+  });
+
+  it("leaves it when the recorded status is In Progress, though the word now maps to Done", () => {
+    expect(
+      clears(
+        revert(
+          {
+            statusKey: "in progress",
+            status: "in_progress",
+            completedOn: "2026-09-27",
+          },
+          remapped,
+        ),
+      ),
+    ).toBe(false);
+  });
+
+  it("leaves it when the word was unmapped when read (recorded null)", () => {
+    expect(
+      clears(
+        revert(
+          { statusKey: "done", status: null, completedOn: "2026-09-27" },
+          base,
+        ),
+      ),
+    ).toBe(false);
+  });
+
+  it("uses the status map for a snapshot saved before the status was recorded", () => {
+    const legacy = { statusKey: "done", completedOn: "2026-09-27" };
+    expect(clears(revert(legacy, base))).toBe(true);
+    expect(clears(revert(legacy, remapped))).toBe(false);
   });
 });

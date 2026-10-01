@@ -13,8 +13,7 @@ import { StatusBadge } from "@/components/status-badge";
 import { TrackerChip } from "@/components/tracker-chip";
 import { backlogAction } from "@/lib/actions/admin";
 import { loadBacklog, loadSheetDeps, loadTracker } from "@/lib/admin/data";
-import { bringToTodayHint } from "@/lib/domain/backlog";
-import { calendarFromDays } from "@/lib/domain/calendar";
+import { backlogReviewHint } from "@/lib/domain/backlog";
 import { REASON_MAX_LENGTH } from "@/lib/domain/status";
 import { formatDay, type LocalDate } from "@/lib/time";
 
@@ -112,9 +111,5 @@ async function backlogHint(goLiveDate: LocalDate): Promise<string | null> {
     store.today(),
     store.loadContext(),
   ]);
-  return bringToTodayHint(
-    goLiveDate,
-    today,
-    calendarFromDays(context.calendar),
-  );
+  return backlogReviewHint(goLiveDate, today, context.calendar);
 }

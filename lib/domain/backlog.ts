@@ -1,6 +1,11 @@
-import { formatDay, maxDate, type LocalDate } from "@/lib/time";
+import { formatDate, formatDay, maxDate, type LocalDate } from "@/lib/time";
 
-import { CalendarNotCoveredError, type WorkingCalendar } from "./calendar";
+import {
+  CalendarNotCoveredError,
+  calendarFromDays,
+  type CalendarDay,
+  type WorkingCalendar,
+} from "./calendar";
 
 /**
  * PRD 6.11, N61: the day Bring to today puts a task on: the first working day on or after the
@@ -35,7 +40,7 @@ export function bringToTodayHint(
     day = bringToTodayDay(goLiveDate, today, calendar);
   } catch (error) {
     if (error instanceof CalendarNotCoveredError)
-      return `The calendar does not cover ${formatDay(error.day)} yet, so Bring to today cannot place tasks.`;
+      return calendarNotCoveredHint(error.day);
     throw error;
   }
   if (day === today) return null;
@@ -47,4 +52,24 @@ export function bringToTodayHint(
     return `Go-live is ${goLive}, a day off (${calendar.offReason(from)}), so Bring to today puts tasks on ${target}, the next working day.`;
   }
   return `Today is a day off (${calendar.offReason(today)}), so Bring to today puts tasks on ${target}, the next working day.`;
+}
+
+/**
+ * The backlog review's hint from the calendar_days rows as loaded. With no rows at all the
+ * calendar reaches no day, so Bring to today is refused (calendar_not_covered) and the hint
+ * says so; the page still renders and Mark done and Cancel stay usable (invariant 7).
+ */
+export function backlogReviewHint(
+  goLiveDate: LocalDate,
+  today: LocalDate,
+  days: readonly CalendarDay[],
+): string | null {
+  if (days.length === 0)
+    return calendarNotCoveredHint(maxDate(goLiveDate, today));
+  return bringToTodayHint(goLiveDate, today, calendarFromDays(days));
+}
+
+/** The day is named with its year: the calendar runs out at a year end. */
+function calendarNotCoveredHint(day: LocalDate): string {
+  return `The calendar does not cover ${formatDate(day, "EEE d MMM yyyy")} yet, so Bring to today cannot place tasks.`;
 }

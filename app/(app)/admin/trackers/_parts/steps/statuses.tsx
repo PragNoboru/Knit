@@ -13,6 +13,7 @@ import { STATUS_LABELS } from "@/lib/domain/status";
 import {
   CLEAR_CELL,
   LEAVE_UNCHANGED,
+  STATUSES_LIVE_HINT,
   statusChoices,
   statusField,
   writeBackField,
@@ -89,6 +90,10 @@ export async function StatusesStep({
             value={writeHeader ?? ""}
           />
         </>
+      ) : null}
+      {tracker.state !== "draft" && !switching ? (
+        // PRD 11, N28: a remap reaches only new rows and rows that change to the word.
+        <p className="text-sm text-muted-foreground">{STATUSES_LIVE_HINT}</p>
       ) : null}
       <Section
         title={`Words in "${statusHeader}"`}

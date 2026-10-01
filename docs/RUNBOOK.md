@@ -63,6 +63,15 @@ Check: Table Editor lists `tasks`, `task_days`, `trackers`; SQL editor `select c
 
 Do not connect Supabase's GitHub integration with automatic migrations: migrations are applied only with `db push`, on purpose.
 
+On a live Knit, migration `20261001120200_snapshot_records_unmapped_words.sql` needs the new code first: merge, wait for the Vercel deploy to finish, then run `pnpm exec supabase db push` (the code from before would undo it). Then check, in the SQL editor, that this returns 0:
+
+```sql
+select count(*) from tasks k join trackers t on t.id = k.tracker_id
+where k.source_snapshot ? 'statusKey'
+  and (k.source_snapshot -> 'status') is distinct from 'null'::jsonb
+  and not (coalesce(t.config -> 'statusMap', '{}'::jsonb) ? (k.source_snapshot ->> 'statusKey'));
+```
+
 ### 2.3 Vercel
 
 `vercel.json` already runs the app in Mumbai (`bom1`, next to the database) and builds only `main` (other branches would share the production database, PRD 18.3).
@@ -139,6 +148,8 @@ Knit never guesses: an unmapped status counts as Yet to Start (never Done), an u
 5. **Backlog review** (shown when old rows are still open): Bring to today, Mark done, or Cancel with a reason. Rows left alone stay history only.
 
 To change a live tracker's mapping later: Admin > Trackers > the tracker > **Edit mapping**. Saving checks the tab and pulls again; history is never rewritten. Choosing another status column takes you to the statuses step: Knit keeps using the old column until the new column's words are mapped there.
+
+Giving a word another Knit status changes only new rows and rows that change to it after you save; tasks already showing the word keep their status. A word mapped for the first time applies to every row that shows it, except tasks changed in Knit meanwhile: those keep their status, with a conflict when the word now means another one.
 
 To connect another tab of a spreadsheet that already has a tracker: **Set up another tab** on the Trackers list or on the tracker's page.
 

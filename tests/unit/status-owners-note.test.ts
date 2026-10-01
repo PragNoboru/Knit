@@ -10,7 +10,11 @@ import {
   type NoteTaskDay,
 } from "@/lib/domain/note";
 import { aliasMap, assigneesFor, splitOwners } from "@/lib/domain/owners";
-import { mapSourceStatus, writeBackFor } from "@/lib/domain/status";
+import {
+  heldSourceStatus,
+  mapSourceStatus,
+  writeBackFor,
+} from "@/lib/domain/status";
 import { renderTemplate } from "@/lib/domain/templates";
 
 const trackers = (
@@ -80,6 +84,90 @@ describe("status mapping (PRD 6.8, N8)", () => {
     expect(writeBackFor("done", googleAds)).toBe("Done");
     expect(writeBackFor("in_progress", noboru)).toBeNull();
     expect(writeBackFor("yet_to_start", noboru)).toBe("");
+  });
+});
+
+describe("heldSourceStatus: a word the row still shows keeps its recorded status (N28, N60)", () => {
+  // "Done" remapped to In Progress after Knit read it as Done.
+  const remapped = TrackerConfig.parse({
+    ...googleAds,
+    statusMap: { ...googleAds.statusMap, done: "in_progress" },
+  });
+  const read = mapSourceStatus("Done", remapped);
+
+  it("returns the recorded status when the word is the snapshot's and a status is recorded", () => {
+    expect(
+      heldSourceStatus(
+        read,
+        { statusKey: "done", status: "done", completedOn: null },
+        remapped,
+      ),
+    ).toEqual({
+      status: "done",
+      mapped: true,
+      key: "done",
+      cancelReason: null,
+    });
+  });
+
+  it("returns the current reading when the word differs, the status is null or absent, or there is no snapshot", () => {
+    for (const snapshot of [
+      { statusKey: "in progress", status: "in_progress" as const },
+      { statusKey: "done", status: null },
+      { statusKey: "done" },
+      null,
+    ]) {
+      const held = heldSourceStatus(
+        read,
+        snapshot && { ...snapshot, completedOn: null },
+        remapped,
+      );
+      expect(held).toBe(read);
+    }
+  });
+
+  it("reads a word removed from the map as unmapped, even beside a recorded Done (invariant 7, N34)", () => {
+    const statusMap = Object.fromEntries(
+      Object.entries(googleAds.statusMap).filter(([word]) => word !== "done"),
+    );
+    const removed = TrackerConfig.parse({ ...googleAds, statusMap });
+    const unmapped = mapSourceStatus("Done", removed);
+    expect(unmapped.mapped).toBe(false);
+    expect(
+      heldSourceStatus(
+        unmapped,
+        { statusKey: "done", status: "done", completedOn: "2026-09-28" },
+        removed,
+      ),
+    ).toBe(unmapped);
+  });
+
+  it("gives a recorded Cancelled its word's configured reason, or null when the config has none", () => {
+    const moved = { statusKey: "moved", status: "cancelled" as const };
+    const remappedMoved = TrackerConfig.parse({
+      ...noboru,
+      statusMap: { ...noboru.statusMap, moved: "yet_to_start" },
+      cancelReasons: {},
+    });
+    expect(
+      heldSourceStatus(
+        mapSourceStatus("Moved", noboru),
+        { ...moved, completedOn: null },
+        noboru,
+      ),
+    ).toMatchObject({ status: "cancelled", cancelReason: "Moved in source" });
+    expect(
+      heldSourceStatus(
+        mapSourceStatus("Moved", remappedMoved),
+        { ...moved, completedOn: null },
+        remappedMoved,
+      ),
+    ).toEqual({
+      status: "cancelled",
+      mapped: true,
+      key: "moved",
+      cancelReason: null,
+    });
   });
 });
 

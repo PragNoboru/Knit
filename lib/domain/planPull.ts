@@ -2,7 +2,12 @@ import type { LocalDate } from "@/lib/time";
 
 import type { KnitStatus, TrackerConfig, UserStatus } from "./config";
 import type { NormalisedRow, SourceSnapshot } from "./rows";
-import { isFinal, writeBackFor } from "./status";
+import {
+  heldSourceStatus,
+  isFinal,
+  writeBackFor,
+  type SourceStatus,
+} from "./status";
 
 /**
  * PRD 10.2 step 6: planPull compares what the sheet says with what Knit holds and returns the
@@ -253,11 +258,11 @@ class Planner {
       : this.today;
   }
 
-  statusFieldsFrom(row: NormalisedRow) {
-    const status = row.status.status;
+  statusFieldsFrom(row: NormalisedRow, source: SourceStatus = row.status) {
+    const status = source.status;
     return {
       status,
-      statusReason: status === "cancelled" ? row.status.cancelReason : null,
+      statusReason: status === "cancelled" ? source.cancelReason : null,
       completedOn: status === "done" ? this.completedOnFor(row) : null,
     };
   }
@@ -421,14 +426,19 @@ class Planner {
     const openEnded = (dates ? dates.dateKind : task.dateKind) === "open";
 
     // 10.3: three-way merge of the status and completed-on values. The source changed when the
-    // word or Completed On differs from the snapshot, or when the word now maps to another
-    // Knit status than when it was read (the admin mapped or remapped it, N19 d).
+    // word or Completed On differs from the snapshot, or when a word recorded as unmapped is
+    // mapped now (N60). N28: a word the row still shows is read as the status recorded with
+    // it, so remapping a word alone is no change; the new mapping reaches new rows and rows
+    // whose word changes later.
     const snapshot = task.sourceSnapshot;
+    const source = heldSourceStatus(row.status, snapshot, this.ctx.config);
+    const held = source !== row.status;
+    const firstMapped =
+      snapshot !== null && snapshot.status === null && row.status.mapped;
     const sourceChanged = snapshot
       ? row.snapshot.statusKey !== snapshot.statusKey ||
         row.snapshot.completedOn !== snapshot.completedOn ||
-        (snapshot.status !== undefined &&
-          snapshot.status !== row.snapshot.status)
+        firstMapped
       : row.status.status !== task.status;
     const openDays = task.taskDays.filter((d) => !d.locked);
     const current =
@@ -437,10 +447,33 @@ class Planner {
       [...openDays].reverse().find((d) => d.day < this.today) ??
       null;
 
+    // N60: when the first mapping is the sheet's only change, a task no longer at the Yet to
+    // Start the unmapped word stood for was changed in Knit since it was read (to a status the
+    // push leaves unwritten, N8, or beside a status-read column Knit does not write, N23, so
+    // its hub change has cleared). Knit's change still wins, with a conflict when the word now
+    // means another status. The snapshot records the word's mapping, so this is raised once.
+    const knitKept =
+      firstMapped &&
+      !task.hubChanged &&
+      task.status !== "yet_to_start" &&
+      row.snapshot.statusKey === snapshot.statusKey &&
+      row.snapshot.completedOn === snapshot.completedOn;
+
     let status = task.status;
     let applied = false;
-    if (sourceChanged && !task.hubChanged) {
-      const incoming = this.statusFieldsFrom(row);
+    if (knitKept) {
+      if (source.status !== task.status) {
+        this.attention("conflict", task.id, task.id, {
+          knit: task.status,
+          source: source.status,
+          sourceWord: row.statusRaw,
+        });
+        this.plan.stats.conflicts += 1;
+      }
+      set.sourceSnapshot = row.snapshot;
+      sourceSynced = true;
+    } else if (sourceChanged && !task.hubChanged) {
+      const incoming = this.statusFieldsFrom(row, source);
       const reopening =
         isFinal(task.status) &&
         !isFinal(incoming.status) &&
@@ -470,9 +503,16 @@ class Planner {
           );
         }
         set.status = incoming.status;
-        set.statusReason = incoming.statusReason;
+        // N28: a held status that stays the same keeps its reason (the remapped word may no
+        // longer have a configured cancel reason, D2).
+        if (!(held && incoming.status === task.status)) {
+          set.statusReason = incoming.statusReason;
+        }
         set.completedOn = incoming.completedOn;
-        set.sourceSnapshot = row.snapshot;
+        set.sourceSnapshot = {
+          ...row.snapshot,
+          status: source.mapped ? source.status : null,
+        };
         sourceSynced = true;
         status = incoming.status;
         applied = true;
@@ -487,7 +527,7 @@ class Planner {
       if (sourceChanged) {
         this.attention("conflict", task.id, task.id, {
           knit: task.status,
-          source: row.status.status,
+          source: source.status,
           sourceWord: row.statusRaw,
         });
         this.plan.stats.conflicts += 1;

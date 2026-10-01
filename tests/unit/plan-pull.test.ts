@@ -419,6 +419,12 @@ describe("planPull: a status word mapped after it was read (PRD 6.8, N19 d, 10.3
     expect(first.attention).toEqual([
       expect.objectContaining({ dedupeKey: "unmapped_status:copy ready" }),
     ]);
+    // N28: the snapshot records that the word was unmapped when read.
+    expect(first.taskUpdates[0]?.set.sourceSnapshot).toEqual({
+      statusKey: "copy ready",
+      status: null,
+      completedOn: null,
+    });
     return { ...afterPlan(dbTask("a"), first), ...over };
   }
 
@@ -487,6 +493,100 @@ describe("planPull: a status word mapped after it was read (PRD 6.8, N19 d, 10.3
     ]);
   });
 
+  it("a status changed in Knit and settled (N8: Blocked is not written) still wins, with a conflict raised once (N60)", () => {
+    // Knit set Blocked; the push left the unmapped word and its null snapshot, hub change cleared.
+    const task = storedUnmapped({ status: "blocked", hubChanged: false });
+    for (const word of ["done", "yet_to_start"] as const) {
+      const cfg = TrackerConfig.parse({
+        ...config,
+        statusMap: { ...config.statusMap, "copy ready": word },
+      });
+      const pullUnder = (t: PlanTask) =>
+        planPull([t], [normaliseWith(copyReady, { config: cfg })], {
+          ...ctx,
+          config: cfg,
+        });
+      const p = pullUnder(task);
+      expect(p.taskUpdates).toEqual([
+        {
+          id: "a",
+          sourceSynced: true,
+          set: {
+            sourceSnapshot: {
+              statusKey: "copy ready",
+              status: word,
+              completedOn: null,
+            },
+          },
+        },
+      ]);
+      expect(p.taskDayUpdates).toEqual([]);
+      expect(p.events).toEqual([]);
+      expect(p.outbox).toEqual([]);
+      expect(p.attention).toEqual([
+        expect.objectContaining({
+          kind: "conflict",
+          taskId: "a",
+          detail: { knit: "blocked", source: word, sourceWord: "Copy ready" },
+        }),
+      ]);
+      expect(p.stats.conflicts).toBe(1);
+
+      // The next pull sees the word as read: no change, no second conflict (invariant 8).
+      const again = pullUnder(afterPlan(task, p));
+      expect(again.taskUpdates).toEqual([]);
+      expect(again.attention).toEqual([]);
+    }
+  });
+
+  it("mapped to the status Knit already set: no conflict, the mapping is recorded (N60)", () => {
+    const task = storedUnmapped({ status: "blocked" });
+    const cfg = TrackerConfig.parse({
+      ...config,
+      statusMap: { ...config.statusMap, "copy ready": "blocked" },
+    });
+    const p = planPull([task], [normaliseWith(copyReady, { config: cfg })], {
+      ...ctx,
+      config: cfg,
+    });
+    expect(p.attention).toEqual([]);
+    expect(p.events).toEqual([]);
+    expect(p.taskUpdates).toEqual([
+      {
+        id: "a",
+        sourceSynced: true,
+        set: {
+          sourceSnapshot: {
+            statusKey: "copy ready",
+            status: "blocked",
+            completedOn: null,
+          },
+        },
+      },
+    ]);
+  });
+
+  it("a first mapping with another sheet edit beside it is applied from the sheet (10.3)", () => {
+    const task = storedUnmapped({ status: "blocked" });
+    const p = planPull(
+      [task],
+      [
+        normaliseWith(
+          row("a", { status: "Copy ready", doneOn: "Tue 29 Sep" }),
+          {
+            config: mapped,
+          },
+        ),
+      ],
+      { ...ctx, config: mapped },
+    );
+    expect(p.taskUpdates[0]?.set).toMatchObject({
+      status: "done",
+      completedOn: "2026-09-29",
+    });
+    expect(p.attention).toEqual([]);
+  });
+
   it("a snapshot without the mapped status (saved by the push) compares the word only", () => {
     // N8: Knit set In progress, which the tracker cannot write; the push saved the word.
     const task = dbTask("a", {
@@ -494,6 +594,235 @@ describe("planPull: a status word mapped after it was read (PRD 6.8, N19 d, 10.3
       sourceSnapshot: { statusKey: "not started", completedOn: null },
     });
     expect(plan([task], [row("a")]).taskUpdates).toEqual([]);
+  });
+
+  it("a word recorded as unmapped and still unmapped: a completed-on edit applies Yet to Start and tells (6.8)", () => {
+    const task = storedUnmapped();
+    const p = plan(
+      [task],
+      [row("a", { status: "Copy ready", doneOn: "Tue 29 Sep" })],
+    );
+    expect(p.taskUpdates).toEqual([
+      expect.objectContaining({
+        set: expect.objectContaining({
+          status: "yet_to_start",
+          sourceSnapshot: {
+            statusKey: "copy ready",
+            status: null,
+            completedOn: "2026-09-29",
+          },
+        }),
+      }),
+    ]);
+    expect(p.attention).toEqual([
+      expect.objectContaining({ dedupeKey: "unmapped_status:copy ready" }),
+    ]);
+    expect(p.events).toEqual([]);
+  });
+});
+
+describe("normaliseRow: the snapshot records the status read (N28)", () => {
+  it("null for an unmapped word, the mapped status otherwise", () => {
+    expect(normalise(row("a", { status: "Copy ready" })).snapshot).toEqual({
+      statusKey: "copy ready",
+      status: null,
+      completedOn: null,
+    });
+    expect(normalise(row("a", { status: "Done" })).snapshot).toEqual({
+      statusKey: "done",
+      status: "done",
+      completedOn: null,
+    });
+  });
+});
+
+describe("planPull: a remapped word applies to later edits only (N28)", () => {
+  /** Under A "copy ready" means Done; the admin then remaps it to In Progress (B). */
+  const A = TrackerConfig.parse({
+    ...config,
+    statusMap: { ...config.statusMap, "copy ready": "done" },
+  });
+  const B = TrackerConfig.parse({
+    ...config,
+    statusMap: { ...config.statusMap, "copy ready": "in_progress" },
+  });
+  const under = (
+    cfg: TrackerConfig,
+    tasks: PlanTask[],
+    rows: SheetRow[],
+  ): ReturnType<typeof planPull> =>
+    planPull(
+      tasks,
+      rows.map((r) => normaliseWith(r, { config: cfg })),
+      { ...ctx, config: cfg },
+    );
+  /** The task and its task-days as apply_pull_plan leaves them. */
+  const applied = (task: PlanTask, p: ReturnType<typeof planPull>) => {
+    const next = afterPlan(task, p);
+    return {
+      ...next,
+      taskDays: next.taskDays.map((d) => {
+        const update = p.taskDayUpdates.find((u) => u.id === d.id);
+        return update ? { ...d, ...update.set } : d;
+      }),
+    };
+  };
+  const copyReady = (over: { doneOn?: string } = {}) =>
+    row("a", { status: "Copy ready", ...over });
+
+  /** Pull under A: the task takes "Copy ready" as Done. */
+  function storedDone(over: Partial<PlanTask> = {}): PlanTask {
+    const p = under(A, [dbTask("a")], [copyReady()]);
+    const task = applied(dbTask("a"), p);
+    expect(task.status).toBe("done");
+    expect(task.sourceSnapshot).toEqual({
+      statusKey: "copy ready",
+      status: "done",
+      completedOn: null,
+    });
+    return { ...task, ...over };
+  }
+
+  it("the sheet unchanged: nothing changes, and a second pull is the same", () => {
+    const task = storedDone();
+    for (let i = 0; i < 2; i += 1) {
+      const p = under(B, [task], [copyReady()]);
+      expect(p.taskUpdates).toEqual([]);
+      expect(p.taskDayUpdates).toEqual([]);
+      expect(p.events).toEqual([]);
+      expect(p.attention).toEqual([]);
+      expect(p.outbox).toEqual([]);
+    }
+  });
+
+  it("changed in Knit meanwhile, word unchanged: no conflict, the write-back stays queued", () => {
+    const task = storedDone({ status: "in_progress", hubChanged: true });
+    const p = under(B, [task], [copyReady()]);
+    expect(p.attention).toEqual([]);
+    expect(p.stats.conflicts).toBe(0);
+    expect(p.outbox).toEqual([
+      {
+        taskId: "a",
+        statusValue: "In progress",
+        completedOn: task.completedOn,
+      },
+    ]);
+  });
+
+  it("the word changes and then changes back: the last pull applies the new meaning", () => {
+    const task = storedDone();
+    const toNotStarted = under(B, [task], [row("a")]);
+    expect(toNotStarted.taskUpdates[0]?.set.status).toBe("yet_to_start");
+    const back = under(B, [applied(task, toNotStarted)], [copyReady()]);
+    expect(back.taskUpdates).toEqual([
+      expect.objectContaining({
+        set: expect.objectContaining({
+          status: "in_progress",
+          sourceSnapshot: {
+            statusKey: "copy ready",
+            status: "in_progress",
+            completedOn: null,
+          },
+        }),
+      }),
+    ]);
+    expect(back.events).toEqual([
+      expect.objectContaining({
+        oldValue: "yet_to_start",
+        newValue: "in_progress",
+      }),
+    ]);
+  });
+
+  it("a new row with the remapped word takes the new meaning", () => {
+    const p = under(B, [], [row("b", { status: "Copy ready" })]);
+    expect(p.taskInserts).toEqual([
+      expect.objectContaining({
+        id: "b",
+        status: "in_progress",
+        sourceSnapshot: {
+          statusKey: "copy ready",
+          status: "in_progress",
+          completedOn: null,
+        },
+      }),
+    ]);
+  });
+
+  it("only Completed On changes: the recorded status is applied with it", () => {
+    const task = storedDone();
+    const p = under(B, [task], [copyReady({ doneOn: "Tue 29 Sep" })]);
+    expect(p.taskUpdates).toEqual([
+      expect.objectContaining({
+        set: expect.objectContaining({
+          status: "done",
+          completedOn: "2026-09-29",
+          sourceSnapshot: {
+            statusKey: "copy ready",
+            status: "done",
+            completedOn: "2026-09-29",
+          },
+        }),
+      }),
+    ]);
+    expect(p.events).toEqual([]);
+  });
+
+  it("a word removed from the map is not held: a completed-on edit never keeps Done (invariant 7)", () => {
+    const task = storedDone();
+    const removed = TrackerConfig.parse({
+      ...config,
+      statusMap: Object.fromEntries(
+        Object.entries(A.statusMap).filter(([word]) => word !== "copy ready"),
+      ),
+    });
+    const p = under(removed, [task], [copyReady({ doneOn: "Tue 29 Sep" })]);
+    expect(p.taskUpdates[0]?.set).toMatchObject({
+      status: "yet_to_start",
+      completedOn: null,
+      sourceSnapshot: {
+        statusKey: "copy ready",
+        status: null,
+        completedOn: "2026-09-29",
+      },
+    });
+    expect(p.attention).toEqual([
+      expect.objectContaining({ dedupeKey: "unmapped_status:copy ready" }),
+    ]);
+  });
+
+  it("a held Cancelled keeps its reason when the remapped word has no cancel reason (D2)", () => {
+    const C = TrackerConfig.parse({
+      ...config,
+      statusMap: { ...config.statusMap, moved: "cancelled" },
+      cancelReasons: { moved: "Moved" },
+    });
+    // As saveStatuses saves it: no cancelReasons entry for a word not mapped to Cancelled.
+    const D = TrackerConfig.parse({
+      ...config,
+      statusMap: { ...config.statusMap, moved: "yet_to_start" },
+      cancelReasons: {},
+    });
+    const first = under(C, [dbTask("a")], [row("a", { status: "Moved" })]);
+    const task = applied(dbTask("a"), first);
+    expect(task).toMatchObject({ status: "cancelled", statusReason: "Moved" });
+
+    const p = under(
+      D,
+      [task],
+      [row("a", { status: "Moved", doneOn: "Tue 29 Sep" })],
+    );
+    expect(p.taskUpdates).toHaveLength(1);
+    const set = p.taskUpdates[0]!.set;
+    expect(set.status).toBe("cancelled");
+    expect(set).not.toHaveProperty("statusReason");
+    expect(set.sourceSnapshot).toEqual({
+      statusKey: "moved",
+      status: "cancelled",
+      completedOn: "2026-09-29",
+    });
+    expect(p.events).toEqual([]);
+    expect(p.taskDayUpdates.map((u) => u.set.reason)).not.toContain(null);
   });
 });
 

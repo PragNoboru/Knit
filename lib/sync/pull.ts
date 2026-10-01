@@ -3,6 +3,7 @@ import type { TrackerConfig } from "@/lib/domain/config";
 import { aliasMap } from "@/lib/domain/owners";
 import { planPull, type PlanTask, type PullPlan } from "@/lib/domain/planPull";
 import { normaliseRow, type NormalisedRow } from "@/lib/domain/rows";
+import { heldSourceStatus } from "@/lib/domain/status";
 import {
   KNIT_ID_HEADER,
   type SheetSource,
@@ -69,12 +70,13 @@ export function withoutSelfConflicts(
   const agrees = (taskId: string | null) => {
     const task = taskId ? taskById.get(taskId) : undefined;
     const row = taskId ? rowById.get(taskId) : undefined;
+    if (task === undefined || row === undefined) return false;
+    // N28: a word the row still shows reads as the status recorded with it.
+    const read = heldSourceStatus(row.status, task.sourceSnapshot, config);
     return (
-      task !== undefined &&
-      row !== undefined &&
       task.hubChanged &&
-      row.status.mapped &&
-      row.status.status === task.status &&
+      read.mapped &&
+      read.status === task.status &&
       (!config.columns.completedOn ||
         row.snapshot.completedOn === task.completedOn)
     );

@@ -139,9 +139,13 @@ export function cellsFor(
       );
     } else if (
       shown?.completedOn &&
-      config.statusMap[shown.statusKey] === "done"
+      (shown.status !== undefined
+        ? shown.status
+        : (config.statusMap[shown.statusKey] ?? null)) === "done"
     ) {
-      // 10.4 step 4: a revert from the Done the sheet shows clears its completed-on value. A
+      // 10.4 step 4, N24: a revert from the Done the sheet shows clears its completed-on
+      // value. Done as Knit last read it: the status recorded with the word (N28; null when
+      // unmapped), or what the word maps to for a snapshot saved before it was recorded. A
       // date beside any other status (typed by a person) is not Knit's to clear.
       cells.push({
         row,
@@ -191,9 +195,10 @@ export function writtenSnapshot(
   if (wrote(config.columns.statusWrite) && readFollowsWrite) {
     const word = textOf(cellOf(row, config.columns.statusRead));
     snapshot.statusKey = normaliseKey(word);
-    // With the word, the Knit status it maps to, as a pull would record it (10.3): the next
-    // pull then sees Knit's own write as no change.
-    snapshot.status = mapSourceStatus(word, config).status;
+    // With the word, the Knit status it maps to now, as a pull would record it (10.3, N28;
+    // null when unmapped): the next pull then sees Knit's own write as no change.
+    const read = mapSourceStatus(word, config);
+    snapshot.status = read.mapped ? read.status : null;
   }
   if (config.columns.completedOn && wrote(config.columns.completedOn)) {
     snapshot.completedOn = dateOf(

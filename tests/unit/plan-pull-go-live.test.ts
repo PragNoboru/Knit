@@ -9,13 +9,13 @@ import { aliasMap } from "@/lib/domain/owners";
 import { planPull, type PlanTask } from "@/lib/domain/planPull";
 import { normaliseRow, type SheetRow } from "@/lib/domain/rows";
 
-// OPEN QUESTION for Pragaman (N42, 6.4 rule 1, 6.6, 6.11). Go-live now defaults to the next
+// PRD Q8 (open, section 21; N42, 6.4 rule 1, 6.6, 6.11). Go-live now defaults to the next
 // working day, so between activation and go-live a live task can be re-dated in the sheet to a
 // day before go-live. The PRD does not say whether it then becomes history only or keeps a
 // task-day on the go-live date. Today the 6.6 "planned date moved" rule moves its open task-day
 // to the new date with no attention item, and close_day locks that day not_done before go-live.
 // The first test pins that behaviour so the gap is on record; the second, an expected failure,
-// states the one thing any answer must give (no task-day before go-live). When the PRD decides,
+// states the one thing any answer must give (no task-day before go-live). When Q8 is decided,
 // replace both with the decided rule.
 //
 // The same gap applies to a backlog row brought forward before go-live (N61): its task-day sits
@@ -125,8 +125,8 @@ const redatedBeforeGoLive = () =>
     config,
   });
 
-describe("a live task re-dated to before go-live (N42: open question, no PRD rule yet)", () => {
-  it("today: its task-day moves to the day before go-live, with no attention item", () => {
+describe("a live task re-dated to before go-live (PRD Q8, open)", () => {
+  it("Q8, until decided: its task-day moves to the day before go-live, with no attention item", () => {
     const p = redatedBeforeGoLive();
     expect(p.taskUpdates[0]!.set).toMatchObject({ dueDate: TODAY });
     expect(p.taskUpdates[0]!.set).not.toHaveProperty("historyOnly");
@@ -134,7 +134,7 @@ describe("a live task re-dated to before go-live (N42: open question, no PRD rul
     expect(p.attention).toEqual([]);
   });
 
-  it.fails("wanted: no task-day lands before go-live", () => {
+  it.fails("Q8: no task-day lands before go-live", () => {
     const p = redatedBeforeGoLive();
     const days = [
       ...p.taskDayUpdates.flatMap((u) => (u.set.day ? [u.set.day] : [])),
@@ -167,8 +167,8 @@ const broughtRedated = () =>
     config,
   });
 
-describe("a brought backlog task re-dated before go-live (N61, N42: open question)", () => {
-  it("today: its task-day moves from go-live to today as a spillover", () => {
+describe("a brought backlog task re-dated before go-live (PRD Q8, open; N61)", () => {
+  it("Q8, until decided: its task-day moves from go-live to today as a spillover", () => {
     const p = broughtRedated();
     expect(p.taskUpdates[0]!.set).toMatchObject({ dueDate: "2026-09-28" });
     expect(p.taskDayUpdates).toEqual([
@@ -177,7 +177,7 @@ describe("a brought backlog task re-dated before go-live (N61, N42: open questio
     expect(p.attention.map((a) => a.kind)).toEqual(["past_date_added"]);
   });
 
-  it.fails("wanted: no task-day lands before go-live", () => {
+  it.fails("Q8: no task-day lands before go-live", () => {
     const p = broughtRedated();
     const days = [
       ...p.taskDayUpdates.flatMap((u) => (u.set.day ? [u.set.day] : [])),

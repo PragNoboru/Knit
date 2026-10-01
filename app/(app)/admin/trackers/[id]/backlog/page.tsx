@@ -14,14 +14,16 @@ import { TrackerChip } from "@/components/tracker-chip";
 import { backlogAction } from "@/lib/actions/admin";
 import { loadBacklog, loadSheetDeps, loadTracker } from "@/lib/admin/data";
 import { bringToTodayHint } from "@/lib/domain/backlog";
+import { calendarFromDays } from "@/lib/domain/calendar";
 import { REASON_MAX_LENGTH } from "@/lib/domain/status";
-import { formatDay } from "@/lib/time";
+import { formatDay, type LocalDate } from "@/lib/time";
 
 export const metadata: Metadata = { title: "Backlog review · Knit" };
 
 // PRD 6.11, 11 step 10: open rows planned before go-live. Bring to today, Mark done, or Cancel
-// (reason required); rows left alone stay history only. While go-live is still ahead, Bring to
-// today puts tasks on the go-live date (N61), and the page says so.
+// (reason required); rows left alone stay history only. Bring to today puts tasks on the first
+// working day on or after the later of today and go-live (N61); when that is not today, the page
+// names the day.
 export default async function BacklogPage({
   params,
 }: {
@@ -31,13 +33,7 @@ export default async function BacklogPage({
   const tracker = await loadTracker(id);
   if (!tracker || tracker.state === "draft") notFound();
   const rows = await loadBacklog(id);
-  const hint =
-    rows.length === 0
-      ? null
-      : bringToTodayHint(
-          tracker.goLiveDate,
-          await (await loadSheetDeps()).store.today(),
-        );
+  const hint = rows.length === 0 ? null : await backlogHint(tracker.goLiveDate);
 
   return (
     <div className="flex flex-col gap-5">
@@ -106,5 +102,19 @@ export default async function BacklogPage({
         </Section>
       )}
     </div>
+  );
+}
+
+/** N61: where Bring to today puts tasks, read from today and the working-day calendar. */
+async function backlogHint(goLiveDate: LocalDate): Promise<string | null> {
+  const { store } = await loadSheetDeps();
+  const [today, context] = await Promise.all([
+    store.today(),
+    store.loadContext(),
+  ]);
+  return bringToTodayHint(
+    goLiveDate,
+    today,
+    calendarFromDays(context.calendar),
   );
 }

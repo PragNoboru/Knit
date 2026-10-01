@@ -13,11 +13,12 @@ import {
 } from "./support/builders";
 import { queryAs, setToday, useTestDb, type Db } from "./support/db";
 
-// PRD N61, 6.11 (amends N42). Go-live defaults to the next working day, so activation comes
-// before go-live and the backlog review opens while go-live is still ahead. Bring to today then
-// creates the task-day on the go-live date, never on a day before it, so the close never locks
-// a miss there. From the go-live date on it uses today. Either way: spill index 1, origin
-// backlog, history only cleared, the task's current status (N19 c).
+// PRD N61, N63, 6.11 (amends N42). Go-live defaults to the next working day, so activation
+// comes before go-live and the backlog review opens while go-live is still ahead. Bring to today
+// creates the task-day on the first working day on or after the later of today and go-live:
+// never before go-live and never on an off day, so the close never locks a miss there. Either
+// way: spill index 1, origin backlog, history only cleared, the task's current status (N19 c),
+// and a note-only write-back so the sheet's Knit Note is refreshed at once (N63).
 
 const SERVICE = { kind: "service" } as const;
 const ACTIVATED = "2026-09-30"; // Wed
@@ -172,94 +173,123 @@ async function bring(db: Db, admin: string, task: string): Promise<void> {
   );
 }
 
-// OPEN QUESTION for Pragaman (N17, N53, N59, D7, 6.9, 6.11). Bring to today clears history only
-// but queues no write-back, so the sheet's Knit Note keeps "Before Knit go-live" until Knit next
-// writes the row: a status change made in Knit, or the close of the day the task-day is on
-// (N17). With N61 that is the close of the go-live day, so all through go-live day the sheet
-// says the row is before go-live while Knit lists it as due. Proposed: Bring to today queues a
-// note-only write-back (N17 rules) for each task it brings, as a moved holiday (N53) and a
-// returned row (N59) do. The first test pins today's behaviour; the second, an expected
-// failure, states what the proposal gives. When the PRD decides, replace both.
-describe("Bring to today and the sheet's Knit Note (open question, no PRD rule yet)", () => {
+describe("Bring to today refreshes the sheet's Knit Note (N63, N17)", () => {
   const db = useTestDb();
+  let admin: string;
   let task: string;
 
   beforeEach(async () => {
     const row = await backlogRow(db(), GO_LIVE);
+    admin = row.admin;
     task = row.task;
     await setToday(db(), ACTIVATED);
-    await bring(db(), row.admin, task);
   });
 
   const queued = async () =>
     (
       await db().query<{ note_only: boolean }>(
         `select coalesce((payload ->> 'note_only')::boolean, false) as note_only
-         from outbox where task_id = $1 and state in ('pending', 'held')`,
+         from outbox where task_id = $1 and state in ('pending', 'held') order by id`,
         [task],
       )
     ).map((r) => r.note_only);
 
-  it("today: nothing is queued, and the activation day's close queues nothing either", async () => {
-    expect(await queued()).toEqual([]);
-    await setToday(db(), GO_LIVE);
-    await closeUpToYesterday(db());
-    expect(await queued()).toEqual([]);
+  it("queues a note-only write-back in the same call", async () => {
+    await bring(db(), admin, task);
+    expect(await queued()).toEqual([true]);
   });
 
-  it.fails(
-    "proposed: Bring to today queues a note-only write-back",
-    async () => {
-      expect(await queued()).toEqual([true]);
-    },
-  );
+  it("queues none when a write-back is already waiting: that push writes the note too", async () => {
+    await db().query(
+      `insert into outbox (task_id, tracker_id, payload)
+       select id, tracker_id, '{"status_value": "In progress"}'::jsonb from tasks where id = $1`,
+      [task],
+    );
+    await bring(db(), admin, task);
+    expect(await queued()).toEqual([false]);
+  });
+
+  it("queues none for a task of an archived tracker (N17: active or paused only)", async () => {
+    await db().query(
+      "update trackers set state = 'archived' where id = (select tracker_id from tasks where id = $1)",
+      [task],
+    );
+    await bring(db(), admin, task);
+    expect(await queued()).toEqual([]);
+  });
 });
 
-// OPEN QUESTION for Pragaman (N61, N42, 6.2, 6.4). A go-live date saved at step 7 can be an off
-// day (N42: any date), and a holiday can be added on it after activation, before the review
-// (N37 moves only task-days that already exist). Bring to today then creates the task-day on
-// that off day, and its close locks it not_done and spills it (6.4 rule 3 closes off days too):
-// a miss on a day nobody worked. Proposed: while go-live is ahead, Bring to today uses the
-// first working day on or after go-live (or step 7 refuses an off day, which still leaves the
-// holiday case). The first test pins today's behaviour; the second, an expected failure, states
-// what any answer must give. When the PRD decides, replace both.
-describe("Bring to today with go-live on an off day (open question, no PRD rule yet)", () => {
+describe("Bring to today never on an off day (N61)", () => {
   const db = useTestDb();
   const HOLIDAY_GO_LIVE = "2026-10-02"; // Fri, Gandhi Jayanti
-  let task: string;
+  const SUNDAY = "2026-10-04";
+  const MONDAY = "2026-10-05";
 
-  beforeEach(async () => {
-    const row = await backlogRow(db(), HOLIDAY_GO_LIVE);
-    task = row.task;
+  const shape = async (task: string) =>
+    (await taskDays(db(), task)).map((d) => [
+      d.day,
+      d.status,
+      d.spill_index,
+      d.origin,
+      d.locked,
+    ]);
+
+  it("go-live ahead on an off day: the working day after it, and no miss", async () => {
+    const { admin, task } = await backlogRow(db(), HOLIDAY_GO_LIVE);
     await setToday(db(), ACTIVATED);
-    await bring(db(), row.admin, task);
+    await bring(db(), admin, task);
+    expect(await shape(task)).toEqual([
+      [AFTER_GO_LIVE, "in_progress", 1, "backlog", false],
+    ]);
+
     await setToday(db(), AFTER_GO_LIVE);
     await closeUpToYesterday(db());
-  });
-
-  it("today: the task-day goes on the holiday, which closes not done", async () => {
-    expect(
-      (await taskDays(db(), task)).map((d) => [
-        d.day,
-        d.status,
-        d.spill_index,
-        d.origin,
-        d.locked,
-      ]),
-    ).toEqual([
-      [HOLIDAY_GO_LIVE, "not_done", 1, "backlog", true],
-      [AFTER_GO_LIVE, "in_progress", 2, "spillover", false],
-    ]);
-  });
-
-  it.fails("wanted: no task-day on an off day, and no miss", async () => {
     const days = await taskDays(db(), task);
     expect(days.filter((d) => d.day === HOLIDAY_GO_LIVE)).toEqual([]);
     expect(days.filter((d) => d.status === "not_done")).toEqual([]);
+    expect(await shape(task)).toEqual([
+      [AFTER_GO_LIVE, "in_progress", 1, "backlog", false],
+    ]);
+  });
+
+  it("after go-live on an off day: the next working day", async () => {
+    const { admin, task } = await backlogRow(db(), GO_LIVE);
+    await setToday(db(), SUNDAY);
+    await bring(db(), admin, task);
+    expect(await shape(task)).toEqual([
+      [MONDAY, "in_progress", 1, "backlog", false],
+    ]);
+  });
+
+  it("refuses with calendar_not_covered when the calendar does not reach the day", async () => {
+    const [last] = await db().query<{ day: string }>(
+      "select max(day)::text as day from calendar_days",
+    );
+    const beyond = await db().query<{ day: string }>(
+      "select ($1::date + 7)::text as day",
+      [last!.day],
+    );
+    const { admin, task } = await backlogRow(db(), beyond[0]!.day);
+    await setToday(db(), ACTIVATED);
+    await expect(bring(db(), admin, task)).rejects.toThrow(
+      /calendar_not_covered/,
+    );
+
+    // Nothing is applied: still history only, no task-day, nothing queued.
+    const [row] = await db().query<{ history_only: boolean }>(
+      "select history_only from tasks where id = $1",
+      [task],
+    );
+    expect(row?.history_only).toBe(true);
+    expect(await taskDays(db(), task)).toEqual([]);
+    const outbox = await db().query("select 1 from outbox where task_id = $1", [
+      task,
+    ]);
+    expect(outbox).toEqual([]);
   });
 });
 
-// OPEN QUESTION for Pragaman (N61, 6.5, 6.9, 12.3, D3, D13). Before go-live a brought task's
+// PRD Q7 (open, section 21; N61, 6.5, 6.9, 12.3, D3, D13). Before go-live a brought task's
 // task-day sits on the go-live date, in the future, though the task was due before go-live.
 // Today then treats it as a future task: In progress, it shows under Pulled forward (12.3 group
 // 4 is for tasks due after today); marked done, it shows in Done today tagged "early" and its
@@ -268,8 +298,8 @@ describe("Bring to today with go-live on an off day (open question, no PRD rule 
 // Pulled forward and Done early leave out backlog task-days, and the row's "Done early" label
 // compares with the task's due date as the note does. The first tests pin today's behaviour;
 // the last, an expected failure, states what any answer must give (the row and the note
-// agree). When the PRD decides, replace them.
-describe("A brought task before go-live on Today (open question, no PRD rule yet)", () => {
+// agree). When Q7 is decided, replace them.
+describe("A brought task before go-live on Today (PRD Q7, open)", () => {
   const db = useTestDb();
   let member: string;
   let task: string;
@@ -331,13 +361,13 @@ describe("A brought task before go-live on Today (open question, no PRD rule yet
     );
   }
 
-  it("today: In progress, it shows under Pulled forward", async () => {
+  it("Q7, until decided: In progress, it shows under Pulled forward", async () => {
     const view = await today();
     expect(view.rows).toEqual([]);
     expect(view.pulledForward.map((c) => c.taskId)).toEqual([task]);
   });
 
-  it("today: done before go-live, its row reads Done early while its note reads after 1 spill", async () => {
+  it("Q7, until decided: done before go-live, its row reads Done early while its note reads after 1 spill", async () => {
     await markDone();
     const view = await today();
     expect(view.earlyDone.map((c) => c.taskId)).toEqual([task]);
@@ -346,7 +376,7 @@ describe("A brought task before go-live on Today (open question, no PRD rule yet
   });
 
   it.fails(
-    "wanted: the row and the Knit Note agree on whether it was done early",
+    "Q7: the row and the Knit Note agree on whether it was done early",
     async () => {
       await markDone();
       const view = await today();

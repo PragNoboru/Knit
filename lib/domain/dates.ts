@@ -18,6 +18,22 @@ export interface CellValue {
   formatted: string;
 }
 
+/** The text a cell shows: its displayed text, else its value as text (10.2 step 3, N66). */
+export function textOf(cell: CellValue): string {
+  if (cell.formatted !== "") return cell.formatted.trim();
+  return cell.value === null ? "" : String(cell.value).trim();
+}
+
+/**
+ * N64, N66: the one definition of a blank cell for the Date and End date pair. The parser
+ * (parsePlannedRange), planned_raw (plannedRawOf), the empty-row rule (isEmptyRow) and the
+ * step 4 End date rate (endDateParseRate) all use it, so they never disagree on whether an
+ * End date is filled.
+ */
+export function isBlankCell(cell: CellValue): boolean {
+  return textOf(cell) === "";
+}
+
 export type InvalidDateReason =
   | "weekday_mismatch"
   | "not_a_date"
@@ -400,7 +416,7 @@ export function parsePlannedRange(
   today: LocalDate,
 ): ParsedDate {
   const alone = parsePlannedDate(dateCell, today);
-  if (endCell === null || (!isSerial(endCell) && cellText(endCell) === "")) {
+  if (endCell === null || isBlankCell(endCell)) {
     return alone;
   }
   if (alone.kind === "empty")

@@ -28,6 +28,7 @@ import {
 } from "./dates";
 import {
   cellOf,
+  isBlankCell,
   plannedRawOf,
   textOf,
   type NormalisedRow,
@@ -175,7 +176,7 @@ export function endDateParseRate(
   const failing = new Set<string>();
   for (const row of rows) {
     const end = cellOf(row, columns.endDate);
-    if (textOf(end) === "") continue;
+    if (isBlankCell(end)) continue;
     total += 1;
     const result = parsePlannedRange(cellOf(row, columns.date), end, today);
     if (result.kind === "single" || result.kind === "window") parsed += 1;

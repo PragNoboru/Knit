@@ -3,9 +3,11 @@ import { fromSheetsSerial, type LocalDate } from "@/lib/time";
 import { CalendarNotCoveredError, type WorkingCalendar } from "./calendar";
 import { normaliseKey, type TrackerConfig, type UserStatus } from "./config";
 import {
+  isBlankCell,
   normaliseDateText,
   parseDateText,
   parsePlannedRange,
+  textOf,
   type CellValue,
   type ParsedDate,
 } from "./dates";
@@ -81,10 +83,7 @@ export function cellOf(row: SheetRow, header: string): CellValue {
   return row.cells[normaliseKey(header)] ?? EMPTY;
 }
 
-export function textOf(cell: CellValue): string {
-  if (cell.formatted !== "") return cell.formatted.trim();
-  return cell.value === null ? "" : String(cell.value).trim();
-}
+export { isBlankCell, textOf };
 
 /** Headers that decide whether a row has any content (10.2 step 3). */
 export function contentHeaders(config: TrackerConfig): string[] {
@@ -103,8 +102,8 @@ export function contentHeaders(config: TrackerConfig): string[] {
 
 /** 10.2 step 3: rows empty in every mapped column are ignored. */
 export function isEmptyRow(row: SheetRow, config: TrackerConfig): boolean {
-  return contentHeaders(config).every(
-    (header) => textOf(cellOf(row, header)) === "",
+  return contentHeaders(config).every((header) =>
+    isBlankCell(cellOf(row, header)),
   );
 }
 
@@ -119,8 +118,10 @@ export function plannedRawOf(
 ): string {
   const date = textOf(cellOf(row, config.columns.date));
   const endHeader = config.columns.endDate;
-  const end = endHeader ? textOf(cellOf(row, endHeader)) : "";
-  return end === "" ? date : `${date} to ${end}`.trim();
+  const endCell = endHeader ? cellOf(row, endHeader) : null;
+  return endCell === null || isBlankCell(endCell)
+    ? date
+    : `${date} to ${textOf(endCell)}`.trim();
 }
 
 function parseCompletedOn(cell: CellValue, today: LocalDate): LocalDate | null {

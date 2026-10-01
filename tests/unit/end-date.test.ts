@@ -6,7 +6,12 @@ import { describe, expect, it } from "vitest";
 import { describeAttention } from "@/lib/domain/attention";
 import { calendarDaysFromRules, calendarFromDays } from "@/lib/domain/calendar";
 import { normaliseKey, TrackerConfig } from "@/lib/domain/config";
-import { parsePlannedDate } from "@/lib/domain/dates";
+import {
+  isBlankCell,
+  parsePlannedDate,
+  parsePlannedRange,
+  type CellValue,
+} from "@/lib/domain/dates";
 import { planKnitIdRecreate } from "@/lib/domain/knit-id-recreate";
 import { aliasMap } from "@/lib/domain/owners";
 import type { PlanTask } from "@/lib/domain/planPull";
@@ -19,7 +24,9 @@ import {
   textOf,
   type SheetRow,
 } from "@/lib/domain/rows";
+import { endDateParseRate } from "@/lib/domain/wizard";
 import { XlsxFixtureSource } from "@/lib/sheets/xlsx";
+import { toSheetsSerial } from "@/lib/time";
 
 // PRD 6.3.4, N64 to N66: the End date column's effect on rows, planned_raw, empty-row detection,
 // the Knit ID recreate key and the Needs Attention copy (12.8).
@@ -163,6 +170,63 @@ describe("contentHeaders (10.2 step 3, N51)", () => {
     expect(isEmptyRow(onlyEnd, withEnd)).toBe(false);
     expect(isEmptyRow(onlyEnd, fbConfig)).toBe(true);
     expect(isEmptyRow(row(3, {}), withEnd)).toBe(true);
+  });
+});
+
+describe("one definition of a blank End date (N64, N66)", () => {
+  // A cell whose value is not a string and whose displayed text is empty: possible from
+  // MemorySheetSource or an xlsx file. Every reader of the End date must agree it is filled.
+  const odd: CellValue[] = [
+    { value: false, formatted: "" },
+    { value: toSheetsSerial("2026-10-16"), formatted: "" },
+  ];
+  const withCells = (end: CellValue): SheetRow => {
+    const base = row(2, { date: "Mon 12 Oct" });
+    return { ...base, cells: { ...base.cells, "end date": end } };
+  };
+
+  it.each(odd)("treats %j as filled everywhere", (end) => {
+    expect(isBlankCell(end)).toBe(false);
+    const sheetRow = withCells(end);
+    const raw = plannedRawOf(sheetRow, withEnd);
+    expect(raw).toBe(`Mon 12 Oct to ${textOf(end)}`);
+    expect(raw).not.toBe("Mon 12 Oct");
+    expect(
+      isEmptyRow({ ...sheetRow, cells: { "end date": end } }, withEnd),
+    ).toBe(false);
+    const parsed = parsePlannedRange(
+      { value: "Mon 12 Oct", formatted: "Mon 12 Oct" },
+      end,
+      "2026-09-25",
+    );
+    // The parser never reads it as a blank End date (a single Mon 12 Oct).
+    expect(parsed).not.toEqual({ kind: "single", start: "2026-10-12" });
+    expect(
+      endDateParseRate(
+        [sheetRow],
+        { date: "Date", endDate: "End date" },
+        "2026-09-25",
+      ).total,
+    ).toBe(1);
+  });
+
+  it("reads a value with no displayed text by its value", () => {
+    const date: CellValue = { value: "Mon 12 Oct", formatted: "Mon 12 Oct" };
+    expect(parsePlannedRange(date, odd[0]!, "2026-09-25")).toEqual({
+      kind: "invalid",
+      reason: "end_date_unreadable",
+    });
+    expect(parsePlannedRange(date, odd[1]!, "2026-09-25")).toEqual({
+      kind: "window",
+      start: "2026-10-12",
+      end: "2026-10-16",
+    });
+  });
+
+  it("treats empty and whitespace cells as blank", () => {
+    expect(isBlankCell({ value: null, formatted: "" })).toBe(true);
+    expect(isBlankCell({ value: "  ", formatted: "  " })).toBe(true);
+    expect(isBlankCell({ value: "  ", formatted: "" })).toBe(true);
   });
 });
 

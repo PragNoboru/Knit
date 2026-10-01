@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { MemorySheetSource, type MemoryFile } from "@/lib/sheets/memory";
 import type { CellWrite, TabRef } from "@/lib/sheets/types";
@@ -13,7 +13,7 @@ import {
   FILING_BUDDY_GOOGLE_ADS,
   taskDays,
 } from "./support/builders";
-import { setToday, useTestDb, type Db } from "./support/db";
+import { queryAs, setToday, useTestDb, type Db } from "./support/db";
 import { storeFor } from "./support/store";
 
 // PRD 10.1, 10.2, 17 (M4): the pull job end to end on a writable copy of the Filing Buddy
@@ -421,46 +421,456 @@ describe("pull (PRD 10.2)", () => {
     ]);
   });
 
-  it("a row restored after its removal was closed is reported even while another date item of its task is open (N30, invariant 7)", async () => {
-    await pull();
-    const [task] = await db().query<{ id: string; ref: string; due: string }>(
-      `select id::text, source_ref as ref, due_date::text as due from tasks
-       where due_date > '2026-09-30' and date_kind = 'single' order by due_date limit 1`,
-    );
-    const tab = file.tabs[0]!;
-    const index = tab.rows.findIndex((cells) =>
-      cells.some((c) => c.formatted === task!.ref),
-    );
-    const saved = tab.rows[index]!.map((cell) => ({ ...cell }));
+  describe("a row that comes back after its task was removed at source (N30, N59)", () => {
+    const UUID = /^[0-9a-f-]{36}$/;
 
-    // The row is deleted on 28 Sep; the close of 28 Sep freezes its cancelled task-day.
-    await source.deleteRow(ctx.ref, index + 1);
-    await pull();
-    await setToday(db(), "2026-09-29");
-    await storeFor(db()).closeDay(TODAY);
-    // Another date item of the task is still open (a clash raised earlier).
-    await db().query(
-      `insert into attention_items (tracker_id, task_id, kind, dedupe_key, detail)
-       values ($1, $2::uuid, 'bad_date', $3, '{"reason": "day_already_used"}')`,
-      [ctx.trackerId, task!.id, `bad_date:${task!.id}`],
-    );
+    /** Takes the row of `sourceRef` out of the sheet; `putBack` restores it, maybe edited. */
+    async function deleteRow(sourceRef: string) {
+      const tab = file.tabs[0]!;
+      const index = tab.rows.findIndex((cells) =>
+        cells.some((c) => c.formatted === sourceRef),
+      );
+      const saved = tab.rows[index]!.map((cell) => ({ ...cell }));
+      const headers = tab.rows[0]!.map((c) => c.formatted);
+      await source.deleteRow(ctx.ref, index + 1);
+      return {
+        putBack: async (edits: Record<string, string> = {}) => {
+          const cells = saved.map((cell) => ({ ...cell }));
+          for (const [header, value] of Object.entries(edits))
+            cells[headers.indexOf(header)] = { value, formatted: value };
+          await source.insertRow(ctx.ref, index + 1, cells);
+        },
+      };
+    }
 
-    // The row comes back.
-    await source.insertRow(ctx.ref, index + 1, saved);
-    await pull();
-    expect(
-      await db().query(
-        `select detail ->> 'reason' as reason from attention_items
-         where task_id = $1 and state = 'open' order by id`,
-        [task!.id],
-      ),
-    ).toEqual([
-      { reason: "day_already_used" },
-      { reason: "restored_after_close" },
-    ]);
-    expect(
-      (await taskDays(db(), task!.id)).map((d) => [d.day, d.status, d.locked]),
-    ).toEqual([[task!.due, "cancelled", true]]);
+    const taskOf = async (sourceRef: string) =>
+      db().query<{ id: string; removed: boolean }>(
+        `select id::text, removed_at_source is not null as removed from tasks
+         where source_ref = $1 order by removed_at_source nulls first`,
+        [sourceRef],
+      );
+    const knitIdInSheet = async (sourceRef: string) =>
+      (await source.readRows(ctx.ref, 1)).find(
+        (r) => r.cells.id?.formatted === sourceRef,
+      )?.cells["knit id"]?.formatted;
+    const lastPullStats = async () =>
+      (
+        await db().query<{ ok: boolean; stats: Record<string, unknown> }>(
+          "select ok, stats from sync_runs where job = 'pull' order by id desc limit 1",
+        )
+      )[0]!;
+    const outboxOf = (taskId: string) =>
+      db().query(
+        "select state::text, payload from outbox where task_id = $1 order by id",
+        [taskId],
+      );
+    const days = async (taskId: string) =>
+      (await taskDays(db(), taskId)).map((d) => [
+        d.day,
+        d.status,
+        d.spill_index,
+        d.origin,
+        d.locked,
+      ]);
+
+    it("after the close of its removal: a new task with a new Knit ID; the old one stays removed with its locked task-day", async () => {
+      await pull();
+      const [old] = await taskOf("G31");
+      const row = await deleteRow("G31");
+      await pull();
+      expect(await taskOf("G31")).toEqual([{ id: old!.id, removed: true }]);
+      expect(await days(old!.id)).toEqual([
+        ["2026-10-05", "cancelled", 0, "planned", false],
+      ]);
+      await setToday(db(), "2026-09-29");
+      await storeFor(db()).closeDay(TODAY);
+
+      await row.putBack();
+      const back = await pull();
+      expect(back).toMatchObject({
+        outcome: "pulled",
+        idsWritten: 1,
+        stats: { inserted: 1, removed: 0 },
+      });
+      const fresh = await knitIdInSheet("G31");
+      expect(fresh).toMatch(UUID);
+      expect(fresh).not.toBe(old!.id);
+      expect(await taskOf("G31")).toEqual([
+        { id: fresh, removed: false },
+        { id: old!.id, removed: true },
+      ]);
+      const [task] = await db().query(
+        "select status::text, history_only, due_date::text as due from tasks where id = $1",
+        [fresh],
+      );
+      expect(task).toEqual({
+        status: "yet_to_start",
+        history_only: false,
+        due: "2026-10-05",
+      });
+      expect(await days(fresh!)).toEqual([
+        ["2026-10-05", "yet_to_start", 0, "planned", false],
+      ]);
+      expect(await days(old!.id)).toEqual([
+        ["2026-10-05", "cancelled", 0, "planned", true],
+      ]);
+      expect((await lastPullStats()).stats).toMatchObject({
+        inserted: 1,
+        removed: 0,
+        rowsReturned: 1,
+      });
+      expect(
+        await db().query(
+          `select kind from attention_items
+           where kind = 'duplicate_knit_id' or detail ->> 'reason' = 'restored_after_close'`,
+        ),
+      ).toEqual([]);
+      // N59: the Knit Note still describes the removed task, so a note-only write-back is queued.
+      expect(await outboxOf(fresh!)).toEqual([
+        { state: "pending", payload: { note_only: true } },
+      ]);
+    });
+
+    it("back before the close: the old task-day is locked cancelled by the close, the new task's is untouched", async () => {
+      await pull();
+      const [old] = await taskOf("G31");
+      const row = await deleteRow("G31");
+      await pull();
+      await row.putBack();
+      await pull();
+      const fresh = await knitIdInSheet("G31");
+      expect(fresh).not.toBe(old!.id);
+
+      await setToday(db(), "2026-09-29");
+      await storeFor(db()).closeDay(TODAY);
+      expect(await days(old!.id)).toEqual([
+        ["2026-10-05", "cancelled", 0, "planned", true],
+      ]);
+      expect(await days(fresh!)).toEqual([
+        ["2026-10-05", "yet_to_start", 0, "planned", false],
+      ]);
+    });
+
+    it("with a due date already past: the new task is a spillover on today with past_date_added", async () => {
+      await pull();
+      const row = await deleteRow("G02");
+      await pull();
+      await setToday(db(), "2026-09-29");
+      await storeFor(db()).closeDay(TODAY);
+      await row.putBack();
+      await pull();
+      const fresh = await knitIdInSheet("G02");
+      expect(await days(fresh!)).toEqual([
+        ["2026-09-29", "yet_to_start", 1, "spillover", false],
+      ]);
+      expect(
+        await db().query(
+          "select kind from attention_items where task_id = $1",
+          [fresh],
+        ),
+      ).toEqual([{ kind: "past_date_added" }]);
+    });
+
+    it("dated before go-live: the new task is history only, and backlog review lists it (6.11)", async () => {
+      await pull();
+      const row = await deleteRow("G31");
+      await pull();
+      await row.putBack({ Date: "Fri 25 Sep" });
+      await pull();
+      const fresh = await knitIdInSheet("G31");
+      const [task] = await db().query(
+        "select history_only from tasks where id = $1",
+        [fresh],
+      );
+      expect(task).toEqual({ history_only: true });
+      expect(await days(fresh!)).toEqual([]);
+      const [backlog] = await queryAs<{ v: unknown }>(
+        db(),
+        { kind: "user", id: ctx.admin },
+        "select admin_backlog($1) as v",
+        [ctx.trackerId],
+      );
+      expect(JSON.stringify(backlog!.v)).toContain(fresh);
+    });
+
+    it("showing Done in the sheet: the new task is done, completed today, with no spillover", async () => {
+      await pull();
+      const row = await deleteRow("G02");
+      await pull();
+      await setToday(db(), "2026-09-29");
+      await storeFor(db()).closeDay(TODAY);
+      await row.putBack({ Status: "Done" });
+      await pull();
+      const fresh = await knitIdInSheet("G02");
+      const [task] = await db().query(
+        "select status::text, completed_on::text from tasks where id = $1",
+        [fresh],
+      );
+      expect(task).toEqual({ status: "done", completed_on: "2026-09-29" });
+      expect(await days(fresh!)).toEqual([]);
+      expect(
+        await db().query(
+          "select kind from attention_items where task_id = $1",
+          [fresh],
+        ),
+      ).toEqual([]);
+    });
+
+    it("deleted and put back between two pulls: the same task, and its Knit ID stays", async () => {
+      await pull();
+      const [old] = await taskOf("G31");
+      const row = await deleteRow("G31");
+      await row.putBack();
+      expect(await pull()).toMatchObject({
+        idsWritten: 0,
+        stats: { inserted: 0, removed: 0 },
+      });
+      expect(await taskOf("G31")).toEqual([{ id: old!.id, removed: false }]);
+      expect(await knitIdInSheet("G31")).toBe(old!.id);
+      expect((await lastPullStats()).stats).toMatchObject({ rowsReturned: 0 });
+    });
+
+    it("pulling again after the return changes nothing (invariant 8)", async () => {
+      await pull();
+      const row = await deleteRow("G31");
+      await pull();
+      await row.putBack();
+      await pull();
+      const before = await snapshot(db(), ctx.trackerId);
+      expect(await pull()).toMatchObject({
+        idsWritten: 0,
+        stats: { inserted: 0, removed: 0 },
+      });
+      expect((await lastPullStats()).stats).toMatchObject({ rowsReturned: 0 });
+      expect(await snapshot(db(), ctx.trackerId)).toEqual(before);
+    });
+
+    it("apply answers retry once: the new ID is written once, the task made once, and the note refresh still queued", async () => {
+      await pull();
+      const row = await deleteRow("G31");
+      await pull();
+      await row.putBack();
+      const store = storeFor(db());
+      let bumped = false;
+      const racing: SyncStore = {
+        ...store,
+        async applyPullPlan(...args) {
+          if (!bumped) {
+            bumped = true;
+            // A change made in Knit meanwhile moves state_version (9.1).
+            await db().query(
+              "update trackers set state_version = state_version + 1 where id = $1",
+              [ctx.trackerId],
+            );
+          }
+          return store.applyPullPlan(...args);
+        },
+      };
+      expect(
+        await pullTracker(
+          { store: racing, source },
+          await trackerRow(db(), ctx.trackerId),
+          { force: true },
+        ),
+      ).toMatchObject({
+        outcome: "pulled",
+        idsWritten: 1,
+        stats: { inserted: 1 },
+      });
+      expect(bumped).toBe(true);
+      const fresh = await knitIdInSheet("G31");
+      expect(await taskOf("G31")).toHaveLength(2);
+      expect(await outboxOf(fresh!)).toEqual([
+        { state: "pending", payload: { note_only: true } },
+      ]);
+      expect((await lastPullStats()).stats).toMatchObject({ rowsReturned: 1 });
+    });
+
+    const recorded = () =>
+      db().query("select knit_id::text from returned_rows order by knit_id");
+    const setDate = async (sourceRef: string, value: string) => {
+      const row = (await source.readRows(ctx.ref, 1)).find(
+        (r) => r.cells.id?.formatted === sourceRef,
+      )!;
+      await source.writeCells(ctx.ref, 1, [
+        { row: row.rowNumber, header: "Date", kind: "text", value },
+      ]);
+    };
+
+    it("a note refresh that fails never fails the pull: the run is recorded ok, the failure logged, and the next pull queues it", async () => {
+      await pull();
+      const row = await deleteRow("G31");
+      await pull();
+      await row.putBack();
+      const store = storeFor(db());
+      const failing: SyncStore = {
+        ...store,
+        refreshReturnedRows: () => Promise.reject(new Error("db down")),
+      };
+      const log = vi.spyOn(console, "log").mockImplementation(() => {});
+      try {
+        expect(
+          await pullTracker(
+            { store: failing, source },
+            await trackerRow(db(), ctx.trackerId),
+            { force: true },
+          ),
+        ).toMatchObject({ outcome: "pulled", stats: { inserted: 1 } });
+        expect(
+          log.mock.calls.some(([line]) =>
+            String(line).includes('"event":"pull.note_refresh_failed"'),
+          ),
+        ).toBe(true);
+      } finally {
+        log.mockRestore();
+      }
+      expect(await lastPullStats()).toMatchObject({
+        ok: true,
+        stats: { rowsReturned: 1 },
+      });
+      const fresh = await knitIdInSheet("G31");
+      expect(await taskOf("G31")).toContainEqual({
+        id: fresh,
+        removed: false,
+      });
+      expect(await outboxOf(fresh!)).toEqual([]);
+      expect(await recorded()).toEqual([{ knit_id: fresh }]);
+
+      // Invariant 8: the returning row was recorded, so the next pull queues the refresh.
+      await pull();
+      expect(await outboxOf(fresh!)).toEqual([
+        { state: "pending", payload: { note_only: true } },
+      ]);
+      expect(await recorded()).toEqual([]);
+    });
+
+    it("with a date Knit cannot read: no task yet; the pull that saves it once the date is fixed queues the note refresh", async () => {
+      await pull();
+      const row = await deleteRow("G31");
+      await pull();
+      await row.putBack({ Date: "TBD" });
+      expect(await pull()).toMatchObject({
+        outcome: "pulled",
+        idsWritten: 1,
+        stats: { inserted: 0 },
+      });
+      const fresh = await knitIdInSheet("G31");
+      expect(fresh).toMatch(UUID);
+      expect(await taskOf("G31")).toHaveLength(1);
+      expect((await lastPullStats()).stats).toMatchObject({ rowsReturned: 1 });
+      expect(await recorded()).toEqual([{ knit_id: fresh }]);
+
+      await setDate("G31", "Mon 5 Oct");
+      expect(await pull()).toMatchObject({
+        outcome: "pulled",
+        idsWritten: 0,
+        stats: { inserted: 1 },
+      });
+      expect(await taskOf("G31")).toContainEqual({
+        id: fresh,
+        removed: false,
+      });
+      expect(await outboxOf(fresh!)).toEqual([
+        { state: "pending", payload: { note_only: true } },
+      ]);
+      expect(await recorded()).toEqual([]);
+      // Pulling again queues nothing more (invariant 8).
+      await pull();
+      expect(await outboxOf(fresh!)).toHaveLength(1);
+    });
+
+    it("a run that fails after writing the new Knit ID loses nothing: the next pull makes the task and queues the note refresh", async () => {
+      await pull();
+      const row = await deleteRow("G31");
+      await pull();
+      await row.putBack();
+      const store = storeFor(db());
+      const failing: SyncStore = {
+        ...store,
+        applyPullPlan: () => Promise.reject(new Error("connection reset")),
+      };
+      const log = vi.spyOn(console, "log").mockImplementation(() => {});
+      try {
+        expect(
+          await pullTracker(
+            { store: failing, source },
+            await trackerRow(db(), ctx.trackerId),
+            { force: true },
+          ),
+        ).toMatchObject({ outcome: "failed" });
+      } finally {
+        log.mockRestore();
+      }
+      const fresh = await knitIdInSheet("G31");
+      expect(fresh).toMatch(UUID);
+      expect(await taskOf("G31")).toHaveLength(1);
+
+      // The next pull sees the new ID as an ordinary new row, and still refreshes its note.
+      expect(await pull()).toMatchObject({
+        outcome: "pulled",
+        idsWritten: 0,
+        stats: { inserted: 1 },
+      });
+      expect((await lastPullStats()).stats).toMatchObject({ rowsReturned: 0 });
+      expect(await outboxOf(fresh!)).toEqual([
+        { state: "pending", payload: { note_only: true } },
+      ]);
+      expect(await recorded()).toEqual([]);
+    });
+
+    it("a pasted copy of a returning row is not recorded and gets no note refresh (N59)", async () => {
+      await pull();
+      const [old] = await taskOf("G31");
+      const row = await deleteRow("G31");
+      await pull();
+      // The copy below the row that came back (the upper one is the returning row).
+      await row.putBack({ ID: "G31b" });
+      await row.putBack();
+      await pull();
+      const copy = (await source.readRows(ctx.ref, 1)).find(
+        (r) => r.cells.id?.formatted === "G31b",
+      )?.cells["knit id"]?.formatted;
+      expect(copy).toMatch(UUID);
+      expect(copy).not.toBe(old!.id);
+      expect(await outboxOf(copy!)).toEqual([]);
+      expect(await outboxOf((await knitIdInSheet("G31"))!)).toHaveLength(1);
+      expect(await recorded()).toEqual([]);
+    });
+
+    it("three stale plans in a row: the run records the Knit IDs it wrote and the rows that came back", async () => {
+      await pull();
+      const row = await deleteRow("G31");
+      await pull();
+      await row.putBack();
+      const store = storeFor(db());
+      const racing: SyncStore = {
+        ...store,
+        async applyPullPlan(...args) {
+          await db().query(
+            "update trackers set state_version = state_version + 1 where id = $1",
+            [ctx.trackerId],
+          );
+          return store.applyPullPlan(...args);
+        },
+      };
+      expect(
+        await pullTracker(
+          { store: racing, source },
+          await trackerRow(db(), ctx.trackerId),
+          { force: true },
+        ),
+      ).toMatchObject({ outcome: "stale" });
+      expect(await lastPullStats()).toEqual({
+        ok: false,
+        stats: {
+          outcome: "stale",
+          idsWritten: 1,
+          idsCleared: 0,
+          idsRestored: 0,
+          rowsReturned: 1,
+        },
+      });
+    });
   });
 
   it("apply_pull_plan answers retry on a stale state_version and applies nothing (17)", async () => {

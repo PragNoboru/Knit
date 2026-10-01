@@ -128,7 +128,13 @@ export function describeEvent(event: TaskEvent): {
       what = `Due date ${dayLabel(event.oldValue)} → ${dayLabel(event.newValue)}`;
       break;
     case "removed":
-      what = "Removed from the sheet";
+    // planPull records a removal (N11) under this field. Before N30 changed (1 Oct 2026) a
+    // row put back recorded "restored" under it too.
+    case "removed_at_source":
+      what =
+        event.newValue === "restored"
+          ? "Back in the sheet"
+          : "Removed from the sheet";
       break;
     default:
       what = `${event.field}: ${event.oldValue ?? "none"} → ${event.newValue ?? "none"}`;

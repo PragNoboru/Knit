@@ -223,6 +223,144 @@ describe("push (PRD 10.4)", () => {
     expect(items).toEqual([{ kind: "row_not_found" }]);
   });
 
+  describe("write-backs of a task removed at source (N11, N30, N59)", () => {
+    /** Takes G01's row out of the sheet; `putBack` restores it as it was. */
+    function takeG01() {
+      const tab = file.tabs[0]!;
+      const saved = tab.rows[1]!.map((cell) => ({ ...cell }));
+      return {
+        remove: () => source.deleteRow(ctx.ref, 2),
+        putBack: () =>
+          source.insertRow(
+            ctx.ref,
+            2,
+            saved.map((cell) => ({ ...cell })),
+          ),
+      };
+    }
+    const cells = () => JSON.stringify(file.tabs[0]!.rows);
+    const rowNotFound = () =>
+      db().query(
+        "select kind, state from attention_items where kind = 'row_not_found' order by id",
+      );
+    const outboxOf = (id: string) =>
+      db().query(
+        "select state::text, last_error from outbox where task_id = $1 order by id",
+        [id],
+      );
+
+    it("a pending write-back of a task then removed fails with row_not_found, and the row put back is never written", async () => {
+      const g01 = await taskId(db(), "G01");
+      await setStatus(g01, "done");
+      const row = takeG01();
+      await row.remove();
+      await pull();
+      await row.putBack();
+      const before = cells();
+      expect(await push()).toMatchObject({ claimed: 1, failed: 1, done: 0 });
+      expect(cells()).toBe(before);
+      expect(await rowNotFound()).toEqual([
+        { kind: "row_not_found", state: "open" },
+      ]);
+      expect(await outboxOf(g01)).toEqual([
+        { state: "failed", last_error: "row_not_found" },
+      ]);
+    });
+
+    it("a correction on a removed task's locked task-day fails with row_not_found, again after Retry", async () => {
+      const admin = await createUser(db(), { role: "admin", name: "Admin" });
+      const g01 = await taskId(db(), "G01");
+      const row = takeG01();
+      await row.remove();
+      await pull();
+      await setToday(db(), "2026-09-29");
+      await storeFor(db()).closeDay(TODAY);
+      await push(); // the Knit Note refreshes the close queued for the other tasks
+      const [day] = await db().query<{ id: string }>(
+        "select id::text from task_days where task_id = $1 and locked",
+        [g01],
+      );
+      await queryAs(
+        db(),
+        { kind: "user", id: admin },
+        "select admin_correct_task_day($1::bigint, 'done', 'Was done on Monday')",
+        [day!.id],
+      );
+      await row.putBack();
+      const before = cells();
+      expect(await push()).toMatchObject({ claimed: 1, failed: 1 });
+      expect(cells()).toBe(before);
+
+      await queryAs(
+        db(),
+        { kind: "user", id: admin },
+        "select admin_retry_writes()",
+      );
+      expect(await push()).toMatchObject({ claimed: 1, failed: 1 });
+      expect(cells()).toBe(before);
+      // Retry resolved the first item; the failed retry raised one open item again.
+      expect(await rowNotFound()).toEqual([
+        { kind: "row_not_found", state: "resolved" },
+        { kind: "row_not_found", state: "open" },
+      ]);
+    });
+
+    it("a task a pull marks removed after the claim is not written, though its row is still there (N59)", async () => {
+      const g01 = await taskId(db(), "G01");
+      await setStatus(g01, "done");
+      const store = storeFor(db());
+      const racing = {
+        ...store,
+        // A pull beside this push (its own lease) marks the task removed once it is claimed;
+        // the row is back in the sheet before the push reads it.
+        async pushClaim(limit: number, task: string | null) {
+          const claimed = await store.pushClaim(limit, task);
+          await db().query(
+            "update tasks set removed_at_source = now() where id = $1",
+            [g01],
+          );
+          return claimed;
+        },
+      };
+      const before = cells();
+      expect(await pushDue({ store: racing, source })).toMatchObject({
+        claimed: 1,
+        failed: 1,
+        done: 0,
+      });
+      expect(cells()).toBe(before);
+      expect(await outboxOf(g01)).toEqual([
+        { state: "failed", last_error: "row_not_found" },
+      ]);
+    });
+
+    it("push_claim says whether each task was removed at source, and a status write-back still beats a note-only one (N17)", async () => {
+      const g01 = await taskId(db(), "G01");
+      const g02 = await taskId(db(), "G02");
+      await db().query(
+        `insert into outbox (task_id, tracker_id, payload) values
+           ($1, $3, '{"status_value": "Done", "completed_on": "2026-09-28"}'),
+           ($1, $3, '{"note_only": true}'),
+           ($2, $3, '{"note_only": true}')`,
+        [g01, g02, ctx.trackerId],
+      );
+      await db().query(
+        "update tasks set removed_at_source = now() where id = $1",
+        [g02],
+      );
+      const claimed = (await storeFor(db()).pushClaim(200, null)) as {
+        payload: Record<string, unknown>;
+        task: { id: string; removedAtSource: boolean };
+      }[];
+      expect(
+        claimed.map((c) => [c.task.id, c.task.removedAtSource, c.payload]),
+      ).toEqual([
+        [g01, false, { status_value: "Done", completed_on: "2026-09-28" }],
+        [g02, true, { note_only: true }],
+      ]);
+    });
+  });
+
   it("never writes to a formula or read-only column (N6)", async () => {
     await db().query(
       `update trackers set config = jsonb_set(config, '{readOnlyColumns}', '["Done on"]') where id = $1`,

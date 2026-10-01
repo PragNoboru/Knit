@@ -10,7 +10,9 @@ import { isFinal, writeBackFor } from "./status";
  * database state, the rows and `today` are parameters. Locked task-days are never in a plan.
  *
  * Rules: 6.3 to 6.8 and the three-way merge of 10.3, with N9 (open-ended tasks), N11
- * (removed rows) and the go-live rule of 6.11.
+ * (removed rows) and the go-live rule of 6.11. A task removed at source never comes back
+ * (N30, N59): a row that comes back gets a new Knit ID from the identity step and is a new
+ * task here.
  */
 
 export type DateKind = "single" | "window" | "open";
@@ -85,7 +87,7 @@ export interface TaskFields {
 
 export interface TaskUpdate {
   id: string;
-  set: Partial<TaskFields> & { removedAtSource?: null };
+  set: Partial<TaskFields>;
   /** The sheet's values were taken in: set source_synced_at to now (10.3). */
   sourceSynced: boolean;
 }
@@ -409,18 +411,6 @@ class Planner {
       }
     }
 
-    if (task.removedAtSource) {
-      set.removedAtSource = null;
-      this.event(
-        task.id,
-        null,
-        "removed_at_source",
-        "removed",
-        "restored",
-        null,
-      );
-    }
-
     if (!sameSet(task.assignees, row.assignees)) {
       this.plan.assigneeSets.push({ taskId: task.id, userIds: row.assignees });
     }
@@ -616,12 +606,7 @@ class Planner {
 
     if (current) {
       const update: TaskDayUpdate["set"] = {};
-      // A restored row gets back the task-day its removal cancelled (6.6).
-      const restoring =
-        task.removedAtSource &&
-        current.status === "cancelled" &&
-        current.reason === REMOVED_REASON;
-      if ((applied || restoring) && current.status !== status) {
+      if (applied && current.status !== status) {
         Object.assign(update, { status, reason, statusChangedOn: this.today });
       }
       // 6.6: a moved planned date moves the open task-day (never one waiting for its close).
@@ -668,30 +653,10 @@ class Planner {
       return;
     }
 
-    // No open task-day: a task that is still open needs one. That includes a row restored after
-    // the close that locked the task-days its removal cancelled (6.6): it is placed like any
-    // task without one, and when that day's task-day is already closed nothing is placed and
-    // the admin is told (invariant 7), instead of the task silently vanishing from every list.
-    // That item has its own key: it must never be merged with another bad_date item of the
-    // task (the row's date unreadable, a date clash), in this plan or still open (N30), since
-    // the restore is recorded now and no later pull raises it again.
-    if (
-      !isFinal(status) &&
-      s.newDue !== null &&
-      (applied || s.dueChanged || task.removedAtSource)
-    ) {
-      if (task.removedAtSource) {
-        const day = s.newDue >= this.today ? s.newDue : this.today;
-        if (task.taskDays.some((d) => d.day === day && d.locked)) {
-          this.attention("bad_date", `restored:${task.id}`, task.id, {
-            reason: "restored_after_close",
-            day,
-            row: row.rowNumber,
-            value: row.plannedRaw,
-          });
-          return;
-        }
-      }
+    // No open task-day: a task that is still open again (its status applied from the sheet) or
+    // whose date moved needs one. A task removed at source never gets here: it never comes back
+    // (N30), so bad_date (restored_after_close) is no longer raised (N54).
+    if (!isFinal(status) && s.newDue !== null && (applied || s.dueChanged)) {
       const spillFloor = task.taskDays.reduce(
         (max, d) => Math.max(max, d.spillIndex),
         0,
@@ -763,8 +728,15 @@ export function planPull(
   for (const row of rows) {
     planner.plan.stats.rows += 1;
     seen.add(row.knitId);
-    planner.rowAttention(row);
     const task = byId.get(row.knitId);
+    // N30, N59: a task removed at source never comes back. The identity step has already given
+    // a row that comes back a new Knit ID, so a row still carrying the removed task's ID is
+    // skipped here, before any row attention, and the removed task is left as it is.
+    if (task?.removedAtSource) {
+      planner.plan.stats.skipped += 1;
+      continue;
+    }
+    planner.rowAttention(row);
     if (task) planner.existingTask(task, row);
     else planner.newTask(row);
   }

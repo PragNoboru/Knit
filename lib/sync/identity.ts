@@ -16,6 +16,10 @@ import {
  *     again in capitals is still the same ID.
  *   * The same Knit ID on two rows (or one that belongs to another tracker): the lower row is
  *     treated as new and gets a new ID; attention duplicate_knit_id.
+ *   * A Knit ID of a task removed at source (a deleted row put back, N30, N59): the upper such
+ *     row is treated as a row without an ID, with no attention item, and is listed in
+ *     `returned` once its new ID is confirmed. A lower row with the same ID is a pasted copy
+ *     (duplicate_knit_id, as above). The removed task's ID never matches a row again.
  *   * Rows without one get a new UUID written into the sheet first. Just before writing, the
  *     rows are read again and an ID is written only where the same row still has the same
  *     title and Knit ID as when it was read. The rows are then read back, and each new ID must
@@ -47,6 +51,11 @@ export interface IdentityResult {
   restored: number;
   /** A Knit ID was overwritten and could not be put back: apply no plan from these rows. */
   unstable: boolean;
+  /**
+   * N59: the confirmed new Knit IDs of rows that came back with the Knit ID of a task removed
+   * at source (lower-cased). Each becomes a new task.
+   */
+  returned: string[];
 }
 
 const KNIT_ID_KEY = normaliseKey(KNIT_ID_HEADER);
@@ -168,6 +177,8 @@ export async function ensureKnitIds(
   rows: SheetRow[],
   idsElsewhere: (ids: string[]) => Promise<string[]>,
   reread: () => Promise<SheetRow[]>,
+  /** The lower-cased Knit IDs of this tracker's tasks removed at source (N30, N59). */
+  retired: ReadonlySet<string> = new Set(),
 ): Promise<IdentityResult> {
   const attention: IdentityAttention[] = [];
   const elsewhere = new Set(
@@ -177,12 +188,15 @@ export async function ensureKnitIds(
   );
 
   const owned = new Set<string>();
+  // N59: the retired IDs seen on a row so far, and the row numbers of those upper rows.
+  const returningIds = new Set<string>();
+  const returning = new Set<number>();
   const needsId: SheetRow[] = [];
   for (const row of rows) {
     const id = knitIdOf(row);
     if (!validId(id)) {
       needsId.push(row);
-    } else if (owned.has(id) || elsewhere.has(id)) {
+    } else if (owned.has(id) || elsewhere.has(id) || returningIds.has(id)) {
       attention.push({
         kind: "duplicate_knit_id",
         dedupeKey: `duplicate_knit_id:${id}`,
@@ -192,6 +206,12 @@ export async function ensureKnitIds(
           otherTracker: elsewhere.has(id),
         },
       });
+      needsId.push(row);
+    } else if (retired.has(id)) {
+      // N30, N59: the row of a task removed at source came back. It is a new task, so it gets
+      // a new Knit ID like a row without one, with no attention item.
+      returningIds.add(id);
+      returning.add(row.rowNumber);
       needsId.push(row);
     } else {
       owned.add(id);
@@ -204,6 +224,7 @@ export async function ensureKnitIds(
     cleared: 0,
     restored: 0,
     unstable: false,
+    returned: [],
   });
   if (needsId.length === 0) return unchanged(rows);
 
@@ -331,5 +352,8 @@ export async function ensureKnitIds(
     cleared: clearedAt.size,
     restored: restoredAt.size,
     unstable,
+    returned: [...confirmed].filter((id) =>
+      returning.has(assigned.get(id)!.row),
+    ),
   };
 }

@@ -65,6 +65,7 @@ describe("Needs Attention texts (12.8)", () => {
     ).toBe(
       "The date became open-ended, but the task still has an open task-day, which Knit left as it was.",
     );
+    // No longer raised (N30, N54); an item raised before 1 Oct 2026 keeps its text.
     expect(
       describeAttention("bad_date", {
         reason: "restored_after_close",
@@ -224,5 +225,20 @@ describe("recreating the Knit ID column (14)", () => {
     // Two rows share "Same title" on 29 Sep: neither can be told apart, so both are new.
     expect(plan.newRows.map((r) => r.row)).toEqual([4, 5, 6]);
     expect(plan.missingTasks.map((t) => t.taskId)).toEqual(["t3", "t4"]);
+  });
+
+  it("never matches a task removed at source: its row is a new row (N30, N59)", () => {
+    const removed = {
+      ...task("t5", "Deleted, then put back", "G05", "Tue 29 Sep"),
+      removedAtSource: true,
+    } as PlanTask;
+    const plan = planKnitIdRecreate(
+      [row(2, "G05", "Deleted, then put back", "Tue 29 Sep")],
+      [removed],
+      config,
+    );
+    expect(plan.matches).toEqual([]);
+    expect(plan.newRows).toEqual([{ row: 2, title: "Deleted, then put back" }]);
+    expect(plan.missingTasks).toEqual([]);
   });
 });

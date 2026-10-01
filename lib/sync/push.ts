@@ -36,7 +36,9 @@ import { checkStructure } from "./structure";
  *      Knit ID found on two rows (a pasted copy, 14) is not guessed at: nothing is written and
  *      the write-back is retried, never failed for good (N22), after the next pull has given
  *      the lower row a new ID. Rows empty in every mapped column do not count, as for the pull
- *      (10.2 step 3), so a Knit ID left on a cleared row never blocks the write.
+ *      (10.2 step 3), so a Knit ID left on a cleared row never blocks the write. A task removed
+ *      at source fails with row_not_found without its row being looked for (N11, N59): a row
+ *      put back after its removal is a new task (N30), never the removed task's row.
  *   3. Never write to a formula or read-only column (N6).
  *   4. Status word (unless the tracker cannot express it, N8), completed-on cell (value on done,
  *      cleared on a revert from the Done the sheet shows) and the Knit Note, in one batch.
@@ -69,6 +71,8 @@ export interface ClaimedWrite {
     dueDate: LocalDate | null;
     historyOnly: boolean;
     sourceSnapshot: SourceSnapshot | null;
+    /** N59: the task was removed at source; its write-backs fail with row_not_found. */
+    removedAtSource: boolean;
   };
   taskDays: NoteTaskDay[];
 }
@@ -298,6 +302,12 @@ async function pushTracker(
 
     const planned: { item: ClaimedWrite; cells: CellWrite[] }[] = [];
     for (const item of items) {
+      if (item.task.removedAtSource) {
+        // N11, N59: the removed task has no row. A row carrying its Knit ID again is a new task
+        // (N30), so the removed task's values are never written to it.
+        await settle(item, false, null, "row_not_found");
+        continue;
+      }
       const holders = holdersById.get(item.task.id.toLowerCase()) ?? [];
       if (holders.length === 0) {
         await settle(item, false, null, "row_not_found");

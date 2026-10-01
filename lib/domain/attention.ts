@@ -64,6 +64,8 @@ function describeBadDate(detail: Record<string, unknown>): string {
       return `The task's task-day on ${day(detail.day)} is already closed, so no new one was placed and the task has no open task-day.`;
     case "became_open_ended":
       return "The date became open-ended, but the task still has an open task-day, which Knit left as it was.";
+    // No new item of this reason is raised (N30, N54): a row that comes back is a new task. An
+    // item raised before 1 Oct 2026 keeps this text until it is dismissed.
     case "restored_after_close":
       return `The row came back after the task's task-day on ${day(detail.day)} was closed, so the task has no open task-day.`;
     default:

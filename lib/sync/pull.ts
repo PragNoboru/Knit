@@ -178,9 +178,18 @@ export async function pullTracker(
     let idsWritten = 0;
     let idsCleared = 0;
     let idsRestored = 0;
+    // N59: new Knit IDs confirmed on rows that came back, across attempts (a new ID written in
+    // one attempt is an ordinary new row in the next).
+    const returned = new Set<string>();
 
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
       const state = await store.loadPullState(tracker.id);
+      // N30, N59: the Knit IDs of tasks removed at source, from the state this attempt applies to.
+      const retired = new Set(
+        state.tasks
+          .filter((task) => task.removedAtSource)
+          .map((task) => task.id.toLowerCase()),
+      );
       const identity = await ensureKnitIds(
         source,
         ref,
@@ -188,10 +197,12 @@ export async function pullTracker(
         await readRows(),
         (ids) => store.knitIdsElsewhere(tracker.id, ids),
         readRows,
+        retired,
       );
       idsWritten += identity.written;
       idsCleared += identity.cleared;
       idsRestored += identity.restored;
+      for (const id of identity.returned) returned.add(id);
       for (const item of identity.attention) {
         await store.raiseAttention(
           tracker.id,
@@ -207,7 +218,13 @@ export async function pullTracker(
         await store.finishRun(
           runId,
           false,
-          { outcome: "stale", idsWritten, idsCleared, idsRestored },
+          {
+            outcome: "stale",
+            idsWritten,
+            idsCleared,
+            idsRestored,
+            rowsReturned: returned.size,
+          },
           "rows moved while Knit IDs were written",
         );
         logEvent("pull.unstable", {
@@ -250,7 +267,29 @@ export async function pullTracker(
       if (applied.result === "applied") {
         // The requests read before this pull loaded its inputs are served; a later one stays.
         if (request) await store.markPullServed(tracker.id, request.requested);
-        const stats = { ...plan.stats, idsWritten, idsCleared, idsRestored };
+        if (returned.size > 0) {
+          // N59, N17: the Knit Note of a row that came back still describes the removed task.
+          // Best effort: the plan is applied, so a failure here never fails the run; the note
+          // is then rewritten by the new task's next write-back.
+          try {
+            await store.enqueueNoteRefresh([...returned]);
+          } catch (error) {
+            logEvent("pull.note_refresh_failed", {
+              job: "pull",
+              tracker: tracker.id,
+              run: runId,
+              count: returned.size,
+              error: errorSummary(error),
+            });
+          }
+        }
+        const stats = {
+          ...plan.stats,
+          idsWritten,
+          idsCleared,
+          idsRestored,
+          rowsReturned: returned.size,
+        };
         await store.finishRun(runId, true, { outcome: "pulled", ...stats });
         logEvent("pull.done", {
           job: "pull",
@@ -270,7 +309,7 @@ export async function pullTracker(
     await store.finishRun(
       runId,
       false,
-      { outcome: "stale" },
+      { outcome: "stale", rowsReturned: returned.size },
       "plan went stale three times",
     );
     logEvent("pull.stale", { job: "pull", tracker: tracker.id, run: runId });

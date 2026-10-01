@@ -403,12 +403,7 @@ const normaliseWith = (
 /** The task as apply_pull_plan leaves it after a plan's task update. */
 function afterPlan(task: PlanTask, p: ReturnType<typeof planPull>): PlanTask {
   const update = p.taskUpdates.find((u) => u.id === task.id);
-  const { removedAtSource, ...set } = update?.set ?? {};
-  return {
-    ...task,
-    ...set,
-    removedAtSource: removedAtSource === null ? false : task.removedAtSource,
-  } as PlanTask;
+  return { ...task, ...update?.set } as PlanTask;
 }
 
 describe("planPull: a status word mapped after it was read (PRD 6.8, N19 d, 10.3)", () => {
@@ -557,77 +552,80 @@ describe("planPull: planned dates moved in the source (PRD 6.6)", () => {
   });
 });
 
-describe("planPull: a row restored after its removal was closed (PRD 6.6, invariant 7)", () => {
-  const cancelled = (day: string) =>
+describe("planPull: a row carrying a removed task's Knit ID (N30, N59)", () => {
+  const cancelled = (day: string, locked: boolean) =>
     taskDay("td-1", day, {
       status: "cancelled",
       reason: "Removed at source",
-      locked: true,
+      locked,
+    });
+  const removed = (day: string, locked: boolean) =>
+    dbTask("a", {
+      dueDate: day,
+      plannedStart: day,
+      removedAtSource: true,
+      taskDays: [cancelled(day, locked)],
     });
 
-  it("due date passed: it comes back as a spillover on today", () => {
-    const task = dbTask("a", {
-      dueDate: "2026-09-29",
-      plannedStart: "2026-09-29",
-      removedAtSource: true,
-      taskDays: [cancelled("2026-09-29")],
-    });
-    const p = plan([task], [row("a", { date: "Tue 29 Sep" })]);
-    expect(p.taskUpdates[0]!.set).toMatchObject({ removedAtSource: null });
-    expect(p.taskDayInserts).toEqual([
-      {
-        taskId: "a",
-        day: TODAY,
-        status: "yet_to_start",
-        spillIndex: 1,
-        origin: "spillover",
-        reason: null,
-        statusChangedOn: null,
-      },
-    ]);
-    expect(p.attention).toEqual([
-      expect.objectContaining({ kind: "past_date_added" }),
-    ]);
-  });
-
-  it("due date ahead but its task-day already closed: nothing placed, the admin is told", () => {
-    const task = dbTask("a", {
-      dueDate: "2026-10-05",
-      plannedStart: "2026-10-05",
-      removedAtSource: true,
-      taskDays: [cancelled("2026-10-05")],
-    });
-    const p = plan([task], [row("a", { date: "Mon 5 Oct" })]);
+  /** The removed task is left exactly as it is: nothing in the plan but the skipped row. */
+  function expectSkipped(p: ReturnType<typeof planPull>) {
+    expect(p.taskInserts).toEqual([]);
+    expect(p.taskUpdates).toEqual([]);
     expect(p.taskDayInserts).toEqual([]);
     expect(p.taskDayUpdates).toEqual([]);
-    expect(p.attention).toEqual([
-      expect.objectContaining({
-        kind: "bad_date",
-        taskId: "a",
-        detail: expect.objectContaining({
-          reason: "restored_after_close",
-          day: "2026-10-05",
-        }),
-      }),
-    ]);
+    expect(p.assigneeSets).toEqual([]);
+    expect(p.removals).toEqual([]);
+    expect(p.outbox).toEqual([]);
+    expect(p.events).toEqual([]);
+    expect(p.attention).toEqual([]);
+    expect(p.stats).toMatchObject({
+      rows: 1,
+      inserted: 0,
+      updated: 0,
+      removed: 0,
+      skipped: 1,
+    });
+  }
+
+  it("with a cancelled open task-day on the same day: skipped, never restored", () => {
+    expectSkipped(plan([removed(TODAY, false)], [row("a")]));
   });
 
-  it("comes back with a date Knit cannot read: both items are raised, each under its own key (N30, invariant 7)", () => {
-    const task = dbTask("a", {
-      dueDate: "2026-10-05",
-      plannedStart: "2026-10-05",
-      removedAtSource: true,
-      taskDays: [cancelled("2026-10-05")],
-    });
-    const p = plan([task], [row("a", { date: "TBD" })]);
-    // The restore is recorded now, so this is the only pull that can say the task has no day.
-    expect(p.taskUpdates[0]!.set).toMatchObject({ removedAtSource: null });
-    expect(p.taskDayInserts).toEqual([]);
-    expect(
-      p.attention.map((a) => [a.kind, a.dedupeKey, a.detail.reason]),
-    ).toEqual([
-      ["bad_date", "bad_date:a", "unparseable"],
-      ["bad_date", "bad_date:restored:a", "restored_after_close"],
-    ]);
+  it("with a cancelled locked task-day: skipped, no restored_after_close item", () => {
+    expectSkipped(
+      plan([removed("2026-10-05", true)], [row("a", { date: "Mon 5 Oct" })]),
+    );
+  });
+
+  it("with a date Knit cannot read: skipped, no bad_date item", () => {
+    expectSkipped(
+      plan([removed("2026-10-05", true)], [row("a", { date: "TBD" })]),
+    );
+  });
+
+  it("with an unmapped status word and an unknown owner: skipped before any row attention", () => {
+    expectSkipped(
+      plan(
+        [removed(TODAY, false)],
+        [row("a", { status: "Copy ready", owner: "Creative" })],
+      ),
+    );
+  });
+
+  it("no plan carries a restored_after_close item or a removedAtSource key", () => {
+    const p = plan(
+      [removed("2026-09-29", true)],
+      [row("a", { date: "Tue 29 Sep" })],
+    );
+    expect(JSON.stringify(p)).not.toContain("restored_after_close");
+    for (const update of p.taskUpdates)
+      expect(Object.keys(update.set)).not.toContain("removedAtSource");
+  });
+
+  it("a removed task whose row is absent is not removed again", () => {
+    const p = plan([removed(TODAY, false)], []);
+    expect(p.removals).toEqual([]);
+    expect(p.events).toEqual([]);
+    expect(p.stats.removed).toBe(0);
   });
 });

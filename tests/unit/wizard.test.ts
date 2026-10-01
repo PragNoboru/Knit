@@ -12,6 +12,9 @@ import {
   completedOnPatternProblem,
   dateParseRate,
   draftProblems,
+  END_DATE_SAME_AS_DATE,
+  endDateParseRate,
+  endDateWarning,
   finalConfig,
   goLiveDefault,
   nextColour,
@@ -315,6 +318,76 @@ describe("the wizard's checks", () => {
         (p) => p.step === "columns" && /planned date/.test(p.problem),
       ),
     ).toBe(true);
+  });
+
+  it("never lets the End date be a write target or the Date column (N64)", () => {
+    const columns = TrackerConfig.parse(
+      byName("Filing Buddy · Google Ads"),
+    ).columns;
+    const withEnd = { ...columns, endDate: "End date" };
+    expect(writeTargetProblem(withEnd, "{Task}")).toBe(null);
+    expect(
+      writeTargetProblem({ ...withEnd, statusWrite: "End date" }, "{Task}"),
+    ).toBe(
+      '"End date" is the planned end date, which Knit never changes. Choose another column to write to.',
+    );
+    expect(
+      writeTargetProblem({ ...withEnd, completedOn: "end date" }, "{Task}"),
+    ).toMatch(/planned end date/);
+    expect(writeTargetProblem({ ...withEnd, endDate: "date" }, "{Task}")).toBe(
+      END_DATE_SAME_AS_DATE,
+    );
+    expect(END_DATE_SAME_AS_DATE).toBe(
+      "Date and End date must be different columns.",
+    );
+  });
+
+  it("carries the End date into the registry, or null when none is chosen (N64)", () => {
+    const expected = TrackerConfig.parse(byName("Noboru · CA Campaign"));
+    const draft: DraftConfig = { ...expected };
+    const none = finalConfig({
+      ...draft,
+      columns: { ...expected.columns, endDate: undefined },
+    });
+    expect(none.success && none.data.columns.endDate).toBe(null);
+    const withEnd = finalConfig({
+      ...draft,
+      columns: { ...expected.columns, endDate: "End date" },
+    });
+    expect(withEnd.success && withEnd.data.columns.endDate).toBe("End date");
+  });
+
+  it("reads the filled End dates with their Date and names the ones it cannot (11 step 4)", () => {
+    const text = (v: string) => ({ value: v, formatted: v });
+    const sheetRow = (rowNumber: number, date: string, end: string) => ({
+      rowNumber,
+      cells: { date: text(date), "end date": text(end) },
+    });
+    const rows = [
+      sheetRow(2, "Mon 12 Oct", "Fri 16 Oct"),
+      sheetRow(3, "Mon 12 Oct", ""),
+      sheetRow(4, "TBD", ""),
+      sheetRow(5, "Mon 12 Oct", "Mon 12 Oct"),
+      sheetRow(6, "Fri 16 Oct", "Mon 12 Oct"),
+      sheetRow(7, "", "Mon 12 Oct"),
+    ];
+    const rate = endDateParseRate(
+      rows,
+      { date: "Date", endDate: "End date" },
+      TODAY,
+    );
+    expect(rate).toEqual({
+      parsed: 2,
+      total: 4,
+      rate: 0.5,
+      failing: ["Fri 16 Oct to Mon 12 Oct", "to Mon 12 Oct"],
+    });
+    expect(endDateWarning(rate)).toBe(
+      "Only 50% of the filled End dates can be read with their Date. Knit cannot read: Fri 16 Oct to Mon 12 Oct, to Mon 12 Oct.",
+    );
+    expect(
+      endDateParseRate([], { date: "Date", endDate: "End date" }, TODAY).rate,
+    ).toBe(1);
   });
 
   it("accepts only completed-on patterns that read back as the same date (6.8)", () => {

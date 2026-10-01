@@ -19,7 +19,14 @@ export interface CellValue {
 }
 
 export type InvalidDateReason =
-  "weekday_mismatch" | "not_a_date" | "range_end_before_start" | "unparseable";
+  | "weekday_mismatch"
+  | "not_a_date"
+  | "range_end_before_start"
+  | "unparseable"
+  // 6.3.4 (N65): a Date read together with an End date.
+  | "end_without_start"
+  | "start_not_single"
+  | "end_date_unreadable";
 
 export type ParsedDate =
   | { kind: "single"; start: LocalDate }
@@ -322,4 +329,99 @@ export function parsePlannedDate(
   }
   const text = typeof cell.value === "string" ? cell.value : cell.formatted;
   return parseDateText(normaliseDateText(text ?? ""), today);
+}
+
+/** One side of a Date and End date pair (6.3.4): a fixed date, or text parts still to resolve. */
+type PairSide =
+  { fixed: LocalDate } | { parts: DateParts } | { unreadable: true };
+
+function isSerial(cell: CellValue): cell is CellValue & { value: number } {
+  return typeof cell.value === "number" && Number.isFinite(cell.value);
+}
+
+function cellText(cell: CellValue): string {
+  return normaliseDateText(
+    (typeof cell.value === "string" ? cell.value : cell.formatted) ?? "",
+  );
+}
+
+function pairSide(cell: CellValue): PairSide {
+  if (isSerial(cell)) return { fixed: fromSheetsSerial(cell.value) };
+  const parts = partsOf(cellText(cell));
+  return parts ? { parts } : { unreadable: true };
+}
+
+const hasYear = (side: { fixed: LocalDate } | { parts: DateParts }) =>
+  "fixed" in side || side.parts.year !== null;
+const hasWeekday = (side: { fixed: LocalDate } | { parts: DateParts }) =>
+  "parts" in side && side.parts.weekday !== null;
+
+function resolveSide(
+  side: { fixed: LocalDate } | { parts: DateParts },
+  reference: LocalDate,
+): SingleResult {
+  return "fixed" in side
+    ? { ok: true, date: side.fixed }
+    : resolveParts(side.parts, reference);
+}
+
+/**
+ * 6.3.4: the years of a Date and End date pair follow N36, like the two ends of a text window
+ * (windowEnds). A real date cell has its year. The side with a year is read first and the
+ * other takes its year around it; else the only side with a weekday; else the End date.
+ */
+function pairEnds(
+  start: { fixed: LocalDate } | { parts: DateParts },
+  end: { fixed: LocalDate } | { parts: DateParts },
+  today: LocalDate,
+): [SingleResult, SingleResult] {
+  if (hasYear(start) && hasYear(end)) {
+    return [resolveSide(start, today), resolveSide(end, today)];
+  }
+  const startFirst =
+    hasYear(start) || (!hasYear(end) && hasWeekday(start) && !hasWeekday(end));
+  if (startFirst) {
+    const first = resolveSide(start, today);
+    return [first, resolveSide(end, first.ok ? first.date : today)];
+  }
+  const first = resolveSide(end, today);
+  return [resolveSide(start, first.ok ? first.date : today), first];
+}
+
+/**
+ * PRD 6.3.4 (N64, N65): a Date read together with an End date. Without an End date (null, or
+ * a blank cell) the Date alone decides, exactly as parsePlannedDate. With one, the Date must be
+ * one date and the End date one date on or after it; anything else is invalid with a reason,
+ * never a guess (invariant 7).
+ */
+export function parsePlannedRange(
+  dateCell: CellValue,
+  endCell: CellValue | null,
+  today: LocalDate,
+): ParsedDate {
+  const alone = parsePlannedDate(dateCell, today);
+  if (endCell === null || (!isSerial(endCell) && cellText(endCell) === "")) {
+    return alone;
+  }
+  if (alone.kind === "empty")
+    return { kind: "invalid", reason: "end_without_start" };
+  if (alone.kind === "invalid") return alone;
+  if (alone.kind !== "single")
+    return { kind: "invalid", reason: "start_not_single" };
+
+  const end = pairSide(endCell);
+  if ("unreadable" in end)
+    return { kind: "invalid", reason: "end_date_unreadable" };
+  // A single Date is a real date cell or text in a single form (parseSingle), so it has parts.
+  const start = pairSide(dateCell);
+  if ("unreadable" in start) return { kind: "invalid", reason: "unparseable" };
+
+  const [startDate, endDate] = pairEnds(start, end, today);
+  if (!endDate.ok) return { kind: "invalid", reason: "end_date_unreadable" };
+  if (!startDate.ok) return { kind: "invalid", reason: startDate.reason };
+  if (endDate.date < startDate.date)
+    return { kind: "invalid", reason: "range_end_before_start" };
+  if (endDate.date === startDate.date)
+    return { kind: "single", start: startDate.date };
+  return { kind: "window", start: startDate.date, end: endDate.date };
 }

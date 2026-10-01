@@ -94,10 +94,11 @@ describe.each(registry.trackers.map((t) => [t.name, t] as const))(
       const { config, structure, rows } = await readTracker(entry);
       const e = entry.expected;
 
-      // Every mapped header exists.
+      // Every mapped header exists, the End date included (N64).
       const headers = new Set(structure.headers.map((h) => h.normalised));
       for (const header of [
         config.columns.date,
+        ...(config.columns.endDate ? [config.columns.endDate] : []),
         config.columns.title,
         config.columns.statusRead,
       ]) {

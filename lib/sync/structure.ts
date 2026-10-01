@@ -28,6 +28,8 @@ export function mappedHeaders(config: TrackerConfig): string[] {
   const { columns } = config;
   const headers = [
     columns.date,
+    // N64: a mapped End date is checked like any mapped header (10.2 step 2).
+    columns.endDate,
     columns.title,
     columns.statusRead,
     columns.statusWrite,

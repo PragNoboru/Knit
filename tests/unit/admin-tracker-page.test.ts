@@ -11,6 +11,7 @@ const ID = "00000000-0000-4000-8000-0000000000f1";
 
 const fx = vi.hoisted(() => ({
   pauseReason: null as string | null,
+  draft: { headerRow: 1 } as AdminTracker["draft"],
   preview: vi.fn(async () => ({ matches: [], newRows: [], missingTasks: [] })),
 }));
 
@@ -33,7 +34,7 @@ vi.mock("@/lib/admin/data", () => ({
     color: "amber",
     state: "paused",
     pauseReason: fx.pauseReason,
-    draft: { headerRow: 1 },
+    draft: fx.draft,
     goLiveDate: "2026-09-28",
     lastPullAt: null,
     ownerUserId: null,
@@ -69,7 +70,25 @@ async function render(pauseReason: string) {
 }
 
 describe("Admin > Tracker", () => {
-  beforeEach(() => fx.preview.mockClear());
+  beforeEach(() => {
+    fx.preview.mockClear();
+    fx.draft = { headerRow: 1 };
+  });
+
+  it("shows the End date mapping after Date, or None (12.8, N64)", async () => {
+    const none = await render("Left the Knit folder");
+    expect(none).toContain(
+      '<dt class="text-muted-foreground">End date</dt><dd class="break-words">None</dd>',
+    );
+    fx.draft = {
+      headerRow: 1,
+      columns: { date: "Date", endDate: "End date" },
+    };
+    const mapped = await render("Left the Knit folder");
+    expect(mapped).toMatch(
+      /<dt[^>]*>Date<\/dt><dd[^>]*>Date<\/dd><\/div><div class="contents"><dt[^>]*>End date<\/dt><dd[^>]*>End date<\/dd>/,
+    );
+  });
 
   it("offers the recreate flow, not Resume, when the Knit ID column is missing", async () => {
     const html = await render("the Knit ID column is missing");

@@ -34,6 +34,11 @@ const DATE_REASONS: Record<string, string> = {
   unparseable: "Knit cannot read it as a date",
   empty: "the date is empty",
   outside_calendar: "it is outside the working-day calendar",
+  // 6.3.4, N65 (12.8): a Date read with its End date.
+  end_without_start: "the End date is filled but the Date is empty",
+  start_not_single:
+    "the Date is already a range or open-ended, so it cannot also have an End date",
+  end_date_unreadable: "Knit cannot read the End date as one date",
 };
 
 const str = (value: unknown) =>

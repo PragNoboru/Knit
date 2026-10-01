@@ -958,3 +958,224 @@ describe("planPull: a row carrying a removed task's Knit ID (N30, N59)", () => {
     expect(p.stats.removed).toBe(0);
   });
 });
+
+describe("planPull: Date with an End date (PRD 6.3.4, 6.6, N64 to N67)", () => {
+  const endConfig = TrackerConfig.parse({
+    ...config,
+    columns: { ...config.columns, endDate: "End date" },
+  });
+  const text = (v: string) => ({ value: v, formatted: v });
+  const endRow = (knitId: string, date: string, end: string): SheetRow => {
+    const r = row(knitId, { date });
+    return { ...r, cells: { ...r.cells, "end date": text(end) } };
+  };
+  const read = (r: SheetRow, today = TODAY) =>
+    normaliseWith(r, { config: endConfig, today });
+  const endCtx = { ...ctx, config: endConfig };
+
+  /** The task as an earlier pull stored the row, with the given task-days. */
+  function stored(r: SheetRow, taskDays: PlanTaskDay[]): PlanTask {
+    const n = read(r);
+    const date = n.date;
+    if (date.kind !== "single" && date.kind !== "window")
+      throw new Error("stored needs a good date");
+    return {
+      ...dbTask(n.knitId),
+      plannedRaw: n.plannedRaw,
+      dateKind: date.kind,
+      plannedStart: date.start,
+      plannedEnd: date.kind === "window" ? date.end : null,
+      dueDate: n.dueDate,
+      sourceSnapshot: n.snapshot,
+      taskDays,
+    };
+  }
+
+  it("stores 'Date to End date' as planned_raw (N66)", () => {
+    const r = read(endRow("a", "Thu 1 Oct", "Mon 5 Oct"));
+    expect(r.plannedRaw).toBe("Thu 1 Oct to Mon 5 Oct");
+    expect(r.date).toEqual({
+      kind: "window",
+      start: "2026-10-01",
+      end: "2026-10-05",
+    });
+    expect(r.dueDate).toBe("2026-10-05");
+    expect(read(endRow("a", "Thu 1 Oct", "")).plannedRaw).toBe("Thu 1 Oct");
+  });
+
+  it("End date moved later: the open task-day moves, with a due_date event", () => {
+    const task = stored(endRow("a", "Thu 1 Oct", "Mon 5 Oct"), [
+      taskDay("td-1", "2026-10-05"),
+    ]);
+    const p = planPull(
+      [task],
+      [read(endRow("a", "Thu 1 Oct", "Wed 7 Oct"))],
+      endCtx,
+    );
+    expect(p.taskDayUpdates).toEqual([
+      { id: "td-1", set: { day: "2026-10-07" } },
+    ]);
+    expect(p.taskUpdates[0]!.set).toMatchObject({
+      plannedEnd: "2026-10-07",
+      dueDate: "2026-10-07",
+      plannedRaw: "Thu 1 Oct to Wed 7 Oct",
+    });
+    expect(p.events).toEqual([
+      expect.objectContaining({
+        field: "due_date",
+        oldValue: "2026-10-05",
+        newValue: "2026-10-07",
+      }),
+    ]);
+  });
+
+  it("End date cleared so the due date has passed: a spillover on today and past_date_added", () => {
+    // Fri 2 Oct is Gandhi Jayanti: the window is due Thu 1 Oct.
+    const task = stored(endRow("a", "Mon 28 Sep", "Fri 2 Oct"), [
+      taskDay("td-1", "2026-10-01"),
+    ]);
+    expect(task.dueDate).toBe("2026-10-01");
+    const p = planPull([task], [read(endRow("a", "Mon 28 Sep", ""))], endCtx);
+    expect(p.taskDayUpdates).toEqual([
+      { id: "td-1", set: { day: TODAY, spillIndex: 1, origin: "spillover" } },
+    ]);
+    expect(p.taskUpdates[0]!.set).toMatchObject({
+      dateKind: "single",
+      plannedEnd: null,
+      dueDate: "2026-09-28",
+      plannedRaw: "Mon 28 Sep",
+    });
+    expect(p.attention).toEqual([
+      expect.objectContaining({ kind: "past_date_added" }),
+    ]);
+  });
+
+  it("End date changed while the open task-day waits for its close: nothing moves yet (N29)", () => {
+    const today = "2026-10-01";
+    const task = stored(endRow("a", "Mon 28 Sep", "Wed 30 Sep"), [
+      taskDay("td-1", "2026-09-30"),
+    ]);
+    const p = planPull(
+      [task],
+      [read(endRow("a", "Mon 28 Sep", "Mon 5 Oct"), today)],
+      { ...endCtx, today },
+    );
+    expect(p.taskDayUpdates).toEqual([]);
+    expect(p.taskUpdates.flatMap((u) => Object.keys(u.set))).not.toContain(
+      "dueDate",
+    );
+  });
+
+  it("End date moved without changing the due date: only the dates and planned_raw change", () => {
+    // Sat 24 Oct is a 4th Saturday: Sun 25 Oct and Sat 24 Oct are both due Fri 23 Oct.
+    const task = stored(endRow("a", "Mon 19 Oct", "Sun 25 Oct"), [
+      taskDay("td-1", "2026-10-23"),
+    ]);
+    expect(task.dueDate).toBe("2026-10-23");
+    const p = planPull(
+      [task],
+      [read(endRow("a", "Mon 19 Oct", "Sat 24 Oct"))],
+      endCtx,
+    );
+    expect(p.taskDayUpdates).toEqual([]);
+    expect(p.events).toEqual([]);
+    expect(p.taskUpdates).toEqual([
+      {
+        id: "a",
+        set: {
+          plannedEnd: "2026-10-24",
+          plannedRaw: "Mon 19 Oct to Sat 24 Oct",
+        },
+        sourceSynced: false,
+      },
+    ]);
+  });
+
+  it("End date before its Date: bad_date range_end_before_start, last good dates kept", () => {
+    const task = stored(endRow("a", "Thu 1 Oct", "Mon 5 Oct"), [
+      taskDay("td-1", "2026-10-05"),
+    ]);
+    const p = planPull(
+      [task],
+      [read(endRow("a", "Thu 1 Oct", "Tue 29 Sep"))],
+      endCtx,
+    );
+    const changed = p.taskUpdates.flatMap((u) => Object.keys(u.set));
+    for (const field of ["dueDate", "plannedStart", "plannedEnd", "dateKind"])
+      expect(changed).not.toContain(field);
+    expect(p.taskDayUpdates).toEqual([]);
+    expect(p.attention).toEqual([
+      expect.objectContaining({
+        kind: "bad_date",
+        detail: expect.objectContaining({
+          reason: "range_end_before_start",
+          value: "Thu 1 Oct to Tue 29 Sep",
+        }),
+      }),
+    ]);
+  });
+
+  it("a new row with an End date but no Date is skipped with bad_date", () => {
+    const p = planPull([], [read(endRow("n", "", "Mon 5 Oct"))], endCtx);
+    expect(p.taskInserts).toEqual([]);
+    expect(p.attention).toEqual([
+      expect.objectContaining({
+        kind: "bad_date",
+        detail: expect.objectContaining({ reason: "end_without_start" }),
+      }),
+    ]);
+  });
+
+  it("the same rows planned again: nothing changes", () => {
+    const rows = [
+      endRow("a", "Thu 1 Oct", "Mon 5 Oct"),
+      endRow("b", "Mon 5 Oct", "Mon 5 Oct"),
+      endRow("c", "Mon 12 Oct", ""),
+    ];
+    const tasks = [
+      stored(rows[0]!, [taskDay("td-a", "2026-10-05")]),
+      stored(rows[1]!, [taskDay("td-b", "2026-10-05")]),
+      stored(rows[2]!, [taskDay("td-c", "2026-10-12")]),
+    ].map((t, i) => ({ ...t, id: ["a", "b", "c"][i]! }));
+    const p = planPull(
+      tasks,
+      rows.map((r) => read(r)),
+      endCtx,
+    );
+    expect(p.taskUpdates).toEqual([]);
+    expect(p.taskDayUpdates).toEqual([]);
+    expect(p.taskInserts).toEqual([]);
+    expect(p.events).toEqual([]);
+    expect(p.attention).toEqual([]);
+  });
+
+  it.each([
+    ["previous_working_day", "2026-10-17", "2026-10-19"],
+    ["next_working_day", "2026-10-19", "2026-10-21"],
+    ["keep", "2026-10-18", "2026-10-20"],
+  ] as const)(
+    "windows are due on their last day under %s (Sun 18 Oct, Tue 20 Oct Dussehra)",
+    (offDayPolicy, sunday, dussehra) => {
+      const policy = TrackerConfig.parse({ ...endConfig, offDayPolicy });
+      const due = (date: string, end: string) =>
+        normaliseWith(endRow("n", date, end), { config: policy }).dueDate;
+      expect(due("Tue 13 Oct", "Sun 18 Oct")).toBe(sunday);
+      expect(due("Mon 19 Oct", "Tue 20 Oct")).toBe(dussehra);
+      const p = planPull(
+        [],
+        [
+          normaliseWith(endRow("n", "Tue 13 Oct", "Sun 18 Oct"), {
+            config: policy,
+          }),
+        ],
+        {
+          ...ctx,
+          config: policy,
+        },
+      );
+      expect(p.taskDayInserts).toEqual([
+        expect.objectContaining({ taskId: "n", day: sunday, spillIndex: 0 }),
+      ]);
+    },
+  );
+});

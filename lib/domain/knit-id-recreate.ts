@@ -1,6 +1,6 @@
 import { normaliseKey, type TrackerConfig } from "./config";
 import type { PlanTask } from "./planPull";
-import { cellOf, textOf, type SheetRow } from "./rows";
+import { cellOf, plannedRawOf, textOf, type SheetRow } from "./rows";
 import { renderTemplate } from "./templates";
 
 /**
@@ -63,10 +63,8 @@ export function planKnitIdRecreate(
   const rowRef = (row: SheetRow) =>
     refHeader ? normaliseKey(textOf(cellOf(row, refHeader))) || null : null;
   const rowKey = (row: SheetRow) =>
-    titleDateKey(
-      rowTitle(row, config),
-      textOf(cellOf(row, config.columns.date)),
-    );
+    // N66: the same planned_raw text the pull stored, End date included.
+    titleDateKey(rowTitle(row, config), plannedRawOf(row, config));
 
   const tasksByRef = unique(open, (task) =>
     task.sourceRef ? normaliseKey(task.sourceRef) : null,

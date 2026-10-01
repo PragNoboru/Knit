@@ -8,7 +8,11 @@ import {
   calendarFromDays,
   CalendarNotCoveredError,
 } from "@/lib/domain/calendar";
-import { parsePlannedDate, type CellValue } from "@/lib/domain/dates";
+import {
+  parsePlannedDate,
+  parsePlannedRange,
+  type CellValue,
+} from "@/lib/domain/dates";
 import { dueDateFor } from "@/lib/domain/due-date";
 import {
   addDays,
@@ -35,9 +39,17 @@ interface DateCase {
   expect: { kind: string; start?: string; end?: string; reason?: string };
 }
 
-const { referenceToday, cases } = fixture<{
+/** 6.3.4: a Date and End date pair; `end` null when the tracker maps no End date. */
+interface EndDateCase {
+  date: Pick<DateCase, "cell" | "input">;
+  end: Pick<DateCase, "cell" | "input"> | null;
+  expect: DateCase["expect"];
+}
+
+const { referenceToday, cases, endDateCases } = fixture<{
   referenceToday: string;
   cases: DateCase[];
+  endDateCases: EndDateCase[];
 }>("date-parser.cases.json");
 const { holidays } = fixture<{ holidays: { date: string; name: string }[] }>(
   "holidays.json",
@@ -46,7 +58,7 @@ const calendar = calendarFromDays(
   calendarDaysFromRules(holidays, "2026-01-01", "2027-12-31"),
 );
 
-function cellFor(c: DateCase): CellValue {
+function cellFor(c: Pick<DateCase, "cell" | "input">): CellValue {
   if (c.cell === "empty") return { value: null, formatted: "" };
   if (c.cell === "date")
     return { value: toSheetsSerial(c.input), formatted: c.input };
@@ -75,6 +87,63 @@ describe("lib/time (invariant 1)", () => {
     expect(todayIST(new Date("2026-09-30T18:40:00Z"))).toBe("2026-10-01");
     expect(todayIST(new Date("2026-09-30T18:20:00Z"))).toBe("2026-09-30");
     expect(minutesIST(new Date("2026-09-30T12:00:00Z"))).toBe(17 * 60 + 30);
+  });
+});
+
+describe("parsePlannedRange (PRD 6.3.4, N64 to N66)", () => {
+  it.each(
+    endDateCases.map(
+      (c) =>
+        [c.date.input || "(blank)", c.end?.input ?? "(no column)", c] as const,
+    ),
+  )("Date %j with End date %j", (_date, _end, c) => {
+    const parsed = parsePlannedRange(
+      cellFor(c.date),
+      c.end === null ? null : cellFor(c.end),
+      referenceToday,
+    );
+    expect(parsed).toEqual(c.expect);
+  });
+
+  it("gives the same result as parsePlannedDate for every case without an End date", () => {
+    const blank: CellValue = { value: null, formatted: "" };
+    const spaces: CellValue = { value: "  ", formatted: "  " };
+    for (const c of cases) {
+      const alone = parsePlannedDate(cellFor(c), referenceToday);
+      expect(parsePlannedRange(cellFor(c), null, referenceToday)).toEqual(
+        alone,
+      );
+      expect(parsePlannedRange(cellFor(c), blank, referenceToday)).toEqual(
+        alone,
+      );
+      expect(parsePlannedRange(cellFor(c), spaces, referenceToday)).toEqual(
+        alone,
+      );
+    }
+  });
+
+  it("reads a text Date without a year around a real End date (N36), not around today", () => {
+    expect(
+      parsePlannedRange(
+        { value: "1 Apr", formatted: "1 Apr" },
+        { value: toSheetsSerial("2027-04-05"), formatted: "05/04/2027" },
+        referenceToday,
+      ),
+    ).toEqual({ kind: "window", start: "2027-04-01", end: "2027-04-05" });
+  });
+
+  it("puts a weekday End date in the year it matches, even before its Date", () => {
+    const date: CellValue = {
+      value: toSheetsSerial("2026-10-13"),
+      formatted: "13/10/2026",
+    };
+    const text = (t: string): CellValue => ({ value: t, formatted: t });
+    expect(parsePlannedRange(date, text("Fri 17 Oct"), referenceToday)).toEqual(
+      { kind: "invalid", reason: "range_end_before_start" },
+    );
+    expect(parsePlannedRange(date, text("Mon 17 Oct"), referenceToday)).toEqual(
+      { kind: "invalid", reason: "end_date_unreadable" },
+    );
   });
 });
 

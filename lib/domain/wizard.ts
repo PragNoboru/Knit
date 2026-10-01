@@ -23,9 +23,16 @@ import {
   normaliseDateText,
   parseDateText,
   parsePlannedDate,
+  parsePlannedRange,
   type CellValue,
 } from "./dates";
-import { cellOf, textOf, type NormalisedRow, type SheetRow } from "./rows";
+import {
+  cellOf,
+  plannedRawOf,
+  textOf,
+  type NormalisedRow,
+  type SheetRow,
+} from "./rows";
 import { templateHeaders } from "./templates";
 
 /**
@@ -153,6 +160,43 @@ export function dateParseRate(
 
 export const DATE_RATE_WARNING = 0.9;
 
+/**
+ * 11 step 4 (N64): with an End date column, how many rows whose End date is filled read as one
+ * date or a window together with their Date (6.3.4). Failing values are their planned_raw text
+ * (N66). Under 90% warns, as the date column does.
+ */
+export function endDateParseRate(
+  rows: readonly SheetRow[],
+  columns: { date: string; endDate: string },
+  today: LocalDate,
+): DateParseRate {
+  let parsed = 0;
+  let total = 0;
+  const failing = new Set<string>();
+  for (const row of rows) {
+    const end = cellOf(row, columns.endDate);
+    if (textOf(end) === "") continue;
+    total += 1;
+    const result = parsePlannedRange(cellOf(row, columns.date), end, today);
+    if (result.kind === "single" || result.kind === "window") parsed += 1;
+    else if (failing.size < 10) failing.add(plannedRawOf(row, { columns }));
+  }
+  return {
+    parsed,
+    total,
+    rate: total === 0 ? 1 : parsed / total,
+    failing: [...failing],
+  };
+}
+
+/** 12.8 (N64): the copy of the End date choice at step 4. */
+export const END_DATE_HINT =
+  "Date is the first day and End date the last. A blank End date is a one-day task.";
+export const END_DATE_SAME_AS_DATE =
+  "Date and End date must be different columns.";
+export const endDateWarning = (rate: DateParseRate) =>
+  `Only ${Math.round(rate.rate * 100)}% of the filled End dates can be read with their Date. Knit cannot read: ${rate.failing.join(", ")}.`;
+
 export interface StatusChoice {
   /** Normalised word, the statusMap key ("" for a blank cell). */
   key: string;
@@ -250,6 +294,8 @@ export function writeTargetProblem(
 ): string | null {
   const roles: [string | null | undefined, string][] = [
     [columns.date, "the planned date"],
+    // N64 (amends N42): the End date is never a write target.
+    [columns.endDate, "the planned end date"],
     [columns.title, "the title"],
     ...(titleTemplate ? templateHeaders(titleTemplate) : []).map(
       (header): [string, string] => [header, "part of the title"],
@@ -262,6 +308,7 @@ export function writeTargetProblem(
   ];
   const same = (a: string | null | undefined, b: string | null | undefined) =>
     Boolean(a) && Boolean(b) && normaliseKey(a!) === normaliseKey(b!);
+  if (same(columns.date, columns.endDate)) return END_DATE_SAME_AS_DATE;
   for (const target of [columns.statusWrite, columns.completedOn]) {
     if (!target) continue;
     const role = roles.find(([header]) => same(header, target));
@@ -363,6 +410,7 @@ export function finalConfig(draft: DraftConfig) {
     headerRow: draft.headerRow,
     columns: {
       date: columns.date,
+      endDate: columns.endDate ?? null,
       title: columns.title,
       statusRead: columns.statusRead,
       statusWrite: columns.statusWrite ?? null,

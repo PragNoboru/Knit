@@ -56,6 +56,7 @@ export default async function TrackerPage({
   const mapping: [string, string][] = [
     ["Header row", String(config.headerRow ?? "")],
     ["Date", config.columns?.date ?? ""],
+    ["End date", config.columns?.endDate ?? "None"],
     ["Title", config.titleTemplate ?? config.columns?.title ?? ""],
     ["Status (read)", config.columns?.statusRead ?? ""],
     ["Status (write)", config.columns?.statusWrite ?? "Not written"],

@@ -136,4 +136,49 @@ describe("checkStructure", () => {
         detail: { header },
       });
   });
+
+  describe("with an End date column (N64)", () => {
+    const withEnd = TrackerConfig.parse({
+      ...config,
+      columns: { ...config.columns, endDate: "End date" },
+    });
+    const endColumns = [
+      ...FILING_BUDDY.slice(0, 2),
+      "End date",
+      ...FILING_BUDDY.slice(2),
+      KNIT_ID_HEADER,
+      KNIT_NOTE_HEADER,
+    ];
+
+    it("passes when it is there", () => {
+      expect(checkStructure(structure(endColumns), withEnd)).toBe(null);
+    });
+
+    it("pauses when it is missing or doubled", () => {
+      expect(checkStructure(structure(knitColumns), withEnd)).toEqual({
+        kind: "missing_header",
+        dedupeKey: "missing_header:end date",
+        reason: "column 'End date' not found",
+        detail: { header: "End date" },
+      });
+      expect(
+        checkStructure(structure([...endColumns, "End date"]), withEnd),
+      ).toEqual({
+        kind: "missing_header",
+        dedupeKey: "missing_header:end date",
+        reason: "column 'End date' appears more than once",
+        detail: { header: "End date", duplicate: true },
+      });
+    });
+
+    it("ignores an End date header when none is mapped", () => {
+      expect(checkStructure(structure(endColumns), config)).toBe(null);
+    });
+
+    it("lets the End date hold formulas, because Knit only reads it", () => {
+      expect(checkStructure(structure(endColumns, ["End date"]), withEnd)).toBe(
+        null,
+      );
+    });
+  });
 });

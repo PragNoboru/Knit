@@ -1,7 +1,7 @@
 {
   "referenceToday": "2026-09-25",
   "timezone": "Asia/Kolkata",
-  "notes": "Every case must pass. 'cell' is the type the value arrives as from the Sheets API (date = a real date cell, text = a string). Numeric dates are always day-first (India). Year inference when the year is missing: if a weekday is present, pick the year in {today.year-1, today.year, today.year+1} whose date falls on that weekday, choosing the one closest to today; if none match, the value is invalid. Without a weekday, pick the year that puts the date within 6 months either side of today.",
+  "notes": "Every case must pass. 'cell' is the type the value arrives as from the Sheets API (date = a real date cell, text = a string). Numeric dates are always day-first (India). Year inference when the year is missing: if a weekday is present, pick the year in {today.year-1, today.year, today.year+1} whose date falls on that weekday, choosing the one closest to today; if none match, the value is invalid. Without a weekday, pick the year that puts the date within 6 months either side of today. endDateCases (PRD 6.3.4, N64 to N67) read a Date together with an End date column, same reference today. end null means the tracker maps no End date column; an empty End date leaves the Date alone. With an End date filled, the Date must be one date (blank: end_without_start; a window or open date: start_not_single; invalid: its own reason) and the End date one date in a single form (else end_date_unreadable). Years follow N36 for the pair: a real date cell has its year; the side with a year is read first and the other takes its year around it, else the only side with a weekday, else the End date. An End date before its Date is range_end_before_start (Fri 17 Oct around a real 13 Oct 2026 reads 17 Oct 2025); the same day is single; a later day is a window.",
   "cases": [
     {
       "cell": "date",
@@ -280,6 +280,276 @@
       "input": "",
       "expect": {
         "kind": "empty"
+      }
+    }
+  ],
+  "endDateCases": [
+    {
+      "date": {
+        "cell": "date",
+        "input": "2026-10-13"
+      },
+      "end": {
+        "cell": "empty",
+        "input": ""
+      },
+      "expect": {
+        "kind": "single",
+        "start": "2026-10-13"
+      }
+    },
+    {
+      "date": {
+        "cell": "date",
+        "input": "2026-10-13"
+      },
+      "end": null,
+      "expect": {
+        "kind": "single",
+        "start": "2026-10-13"
+      }
+    },
+    {
+      "date": {
+        "cell": "date",
+        "input": "2026-10-13"
+      },
+      "end": {
+        "cell": "date",
+        "input": "2026-10-16"
+      },
+      "expect": {
+        "kind": "window",
+        "start": "2026-10-13",
+        "end": "2026-10-16"
+      }
+    },
+    {
+      "date": {
+        "cell": "date",
+        "input": "2026-10-13"
+      },
+      "end": {
+        "cell": "date",
+        "input": "2026-10-13"
+      },
+      "expect": {
+        "kind": "single",
+        "start": "2026-10-13"
+      }
+    },
+    {
+      "date": {
+        "cell": "date",
+        "input": "2026-10-16"
+      },
+      "end": {
+        "cell": "date",
+        "input": "2026-10-13"
+      },
+      "expect": {
+        "kind": "invalid",
+        "reason": "range_end_before_start"
+      }
+    },
+    {
+      "date": {
+        "cell": "date",
+        "input": "2026-10-13"
+      },
+      "end": {
+        "cell": "text",
+        "input": "TBD"
+      },
+      "expect": {
+        "kind": "invalid",
+        "reason": "end_date_unreadable"
+      }
+    },
+    {
+      "date": {
+        "cell": "date",
+        "input": "2026-10-13"
+      },
+      "end": {
+        "cell": "text",
+        "input": "Mon 17 Oct"
+      },
+      "expect": {
+        "kind": "invalid",
+        "reason": "end_date_unreadable"
+      }
+    },
+    {
+      "date": {
+        "cell": "date",
+        "input": "2026-10-13"
+      },
+      "end": {
+        "cell": "text",
+        "input": "Fri 17 Oct"
+      },
+      "expect": {
+        "kind": "invalid",
+        "reason": "range_end_before_start"
+      }
+    },
+    {
+      "date": {
+        "cell": "date",
+        "input": "2026-10-13"
+      },
+      "end": {
+        "cell": "text",
+        "input": "14-16 Oct"
+      },
+      "expect": {
+        "kind": "invalid",
+        "reason": "end_date_unreadable"
+      }
+    },
+    {
+      "date": {
+        "cell": "date",
+        "input": "2026-10-13"
+      },
+      "end": {
+        "cell": "text",
+        "input": "From 2 Nov"
+      },
+      "expect": {
+        "kind": "invalid",
+        "reason": "end_date_unreadable"
+      }
+    },
+    {
+      "date": {
+        "cell": "date",
+        "input": "2026-10-13"
+      },
+      "end": {
+        "cell": "text",
+        "input": "31 Sep 2026"
+      },
+      "expect": {
+        "kind": "invalid",
+        "reason": "end_date_unreadable"
+      }
+    },
+    {
+      "date": {
+        "cell": "empty",
+        "input": ""
+      },
+      "end": {
+        "cell": "date",
+        "input": "2026-10-16"
+      },
+      "expect": {
+        "kind": "invalid",
+        "reason": "end_without_start"
+      }
+    },
+    {
+      "date": {
+        "cell": "text",
+        "input": "1-6 Oct"
+      },
+      "end": {
+        "cell": "date",
+        "input": "2026-10-09"
+      },
+      "expect": {
+        "kind": "invalid",
+        "reason": "start_not_single"
+      }
+    },
+    {
+      "date": {
+        "cell": "text",
+        "input": "From 30 Oct"
+      },
+      "end": {
+        "cell": "date",
+        "input": "2026-11-02"
+      },
+      "expect": {
+        "kind": "invalid",
+        "reason": "start_not_single"
+      }
+    },
+    {
+      "date": {
+        "cell": "text",
+        "input": "TBD"
+      },
+      "end": {
+        "cell": "date",
+        "input": "2026-11-02"
+      },
+      "expect": {
+        "kind": "invalid",
+        "reason": "unparseable"
+      }
+    },
+    {
+      "date": {
+        "cell": "text",
+        "input": "Mon 12 Oct"
+      },
+      "end": {
+        "cell": "text",
+        "input": "Fri 16 Oct"
+      },
+      "expect": {
+        "kind": "window",
+        "start": "2026-10-12",
+        "end": "2026-10-16"
+      }
+    },
+    {
+      "date": {
+        "cell": "date",
+        "input": "2027-03-20"
+      },
+      "end": {
+        "cell": "text",
+        "input": "5 Apr"
+      },
+      "expect": {
+        "kind": "window",
+        "start": "2027-03-20",
+        "end": "2027-04-05"
+      }
+    },
+    {
+      "date": {
+        "cell": "text",
+        "input": "1 Apr"
+      },
+      "end": {
+        "cell": "date",
+        "input": "2027-04-05"
+      },
+      "expect": {
+        "kind": "window",
+        "start": "2027-04-01",
+        "end": "2027-04-05"
+      }
+    },
+    {
+      "date": {
+        "cell": "text",
+        "input": "13 Oct"
+      },
+      "end": {
+        "cell": "text",
+        "input": "16 Oct"
+      },
+      "expect": {
+        "kind": "window",
+        "start": "2026-10-13",
+        "end": "2026-10-16"
       }
     }
   ]

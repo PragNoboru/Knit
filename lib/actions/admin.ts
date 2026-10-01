@@ -380,6 +380,8 @@ export async function saveColumns(
   const titleTemplate = text(form, "titleTemplate") || `{${title}}`;
   const columns = {
     date,
+    // N64: optional; null for "No end date column".
+    endDate: pick("endDate"),
     title,
     statusRead,
     statusWrite,

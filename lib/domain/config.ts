@@ -28,6 +28,8 @@ export const TrackerConfig = z.object({
   headerRow: z.number().int().min(1),
   columns: z.object({
     date: z.string().min(1),
+    /** N64: an optional End date column, the last day of a window (6.3.4); never written. */
+    endDate: z.string().min(1).nullable().default(null),
     title: z.string().min(1),
     statusRead: z.string().min(1),
     statusWrite: z.string().min(1).nullable(),

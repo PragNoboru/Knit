@@ -381,6 +381,47 @@ describe("map columns (11 step 4)", () => {
     expect(savedConfigs()).toEqual([]);
   });
 
+  it("saves the End date column, or null for No end date column (N64)", async () => {
+    fx.tracker = trackerWith("draft");
+    await expect(
+      actions.saveColumns(
+        TRACKER_ID,
+        { error: null },
+        columnsForm({ endDate: "Notes" }),
+      ),
+    ).rejects.toThrow(/redirect:/);
+    expect(savedConfigs()[0]?.columns?.endDate).toBe("Notes");
+
+    fx.calls = [];
+    await expect(
+      actions.saveColumns(
+        TRACKER_ID,
+        { error: null },
+        columnsForm({ endDate: "" }),
+      ),
+    ).rejects.toThrow(/redirect:/);
+    expect(savedConfigs()[0]?.columns?.endDate).toBe(null);
+  });
+
+  it("refuses the End date as a write target or as the Date column (N64)", async () => {
+    fx.tracker = trackerWith("draft");
+    const asTarget = await actions.saveColumns(
+      TRACKER_ID,
+      { error: null },
+      columnsForm({ endDate: "Done on" }),
+    );
+    expect(asTarget.error).toBe(
+      '"Done on" is the planned end date, which Knit never changes. Choose another column to write to.',
+    );
+    const asDate = await actions.saveColumns(
+      TRACKER_ID,
+      { error: null },
+      columnsForm({ endDate: "Date" }),
+    );
+    expect(asDate.error).toBe("Date and End date must be different columns.");
+    expect(savedConfigs()).toEqual([]);
+  });
+
   it("refuses a completed-on pattern Knit cannot read back (finding 36)", async () => {
     const result = await actions.saveColumns(
       TRACKER_ID,

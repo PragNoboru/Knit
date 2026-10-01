@@ -5,7 +5,7 @@ import { normaliseKey, type TrackerConfig, type UserStatus } from "./config";
 import {
   normaliseDateText,
   parseDateText,
-  parsePlannedDate,
+  parsePlannedRange,
   type CellValue,
   type ParsedDate,
 } from "./dates";
@@ -91,6 +91,8 @@ export function contentHeaders(config: TrackerConfig): string[] {
   const { columns } = config;
   return [
     columns.date,
+    // N64: a row holding only an End date is not empty, so it raises bad_date (N65).
+    ...(columns.endDate ? [columns.endDate] : []),
     columns.title,
     columns.statusRead,
     ...(columns.owner ? [columns.owner] : []),
@@ -104,6 +106,21 @@ export function isEmptyRow(row: SheetRow, config: TrackerConfig): boolean {
   return contentHeaders(config).every(
     (header) => textOf(cellOf(row, header)) === "",
   );
+}
+
+/**
+ * N66: the planned date as the sheet shows it. The Date cell's text, or "{Date} to {End date}"
+ * when an End date is mapped and filled ("to {End date}" when the Date is blank). The pull
+ * stores it as planned_raw and the Knit ID recreate (N19 e) matches by it.
+ */
+export function plannedRawOf(
+  row: SheetRow,
+  config: { columns: Pick<TrackerConfig["columns"], "date" | "endDate"> },
+): string {
+  const date = textOf(cellOf(row, config.columns.date));
+  const endHeader = config.columns.endDate;
+  const end = endHeader ? textOf(cellOf(row, endHeader)) : "";
+  return end === "" ? date : `${date} to ${end}`.trim();
 }
 
 function parseCompletedOn(cell: CellValue, today: LocalDate): LocalDate | null {
@@ -121,8 +138,11 @@ export function normaliseRow(row: SheetRow, ctx: RowContext): NormalisedRow {
   const lookup = (normalisedHeader: string) =>
     textOf(row.cells[normalisedHeader] ?? EMPTY);
 
-  const dateCell = cellOf(row, columns.date);
-  const date = parsePlannedDate(dateCell, today);
+  const date = parsePlannedRange(
+    cellOf(row, columns.date),
+    columns.endDate ? cellOf(row, columns.endDate) : null,
+    today,
+  );
   let dueDate: LocalDate | null = null;
   let outsideCalendar = false;
   try {
@@ -170,7 +190,7 @@ export function normaliseRow(row: SheetRow, ctx: RowContext): NormalisedRow {
     ownerRaw: columns.owner ? text(columns.owner) || null : null,
     assignees: owners.userIds,
     unknownOwners: owners.unknown,
-    plannedRaw: textOf(dateCell),
+    plannedRaw: plannedRawOf(row, config),
     date,
     dueDate,
     offDayMove: dueDate !== null && planned !== null && dueDate !== planned,

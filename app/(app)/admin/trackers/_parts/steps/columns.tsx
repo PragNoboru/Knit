@@ -17,10 +17,14 @@ import {
   columnSamples,
   DATE_RATE_WARNING,
   dateParseRate,
+  END_DATE_HINT,
+  endDateParseRate,
+  endDateWarning,
 } from "@/lib/domain/wizard";
 
 // PRD 11 step 4: map the columns. Formula columns are read-only (N6); the date column shows how
-// many of its cells Knit can read, with a warning under 90%.
+// many of its cells Knit can read, with a warning under 90%, and so do the filled End dates read
+// with their Date (N64, 6.3.4).
 export async function ColumnsStep({ tracker }: { tracker: AdminTracker }) {
   const headerRow = tracker.draft.headerRow;
   if (!headerRow)
@@ -40,6 +44,14 @@ export async function ColumnsStep({ tracker }: { tracker: AdminTracker }) {
   const dateRate = columns.date
     ? rates.get(normaliseKey(columns.date))
     : undefined;
+  const endRate =
+    columns.date && columns.endDate
+      ? endDateParseRate(
+          rows,
+          { date: columns.date, endDate: columns.endDate },
+          today,
+        )
+      : undefined;
   const headerOptions = (writeTarget: boolean) =>
     structure.headers.map((h) => (
       <option
@@ -110,12 +122,24 @@ export async function ColumnsStep({ tracker }: { tracker: AdminTracker }) {
             read. Knit cannot read: {dateRate.failing.join(", ")}.
           </p>
         ) : null}
+        {endRate && endRate.rate < DATE_RATE_WARNING ? (
+          <p
+            role="alert"
+            className="mb-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-400/40 dark:bg-amber-400/10 dark:text-amber-200"
+          >
+            {endDateWarning(endRate)}
+          </p>
+        ) : null}
         <ActionForm
           action={saveColumns.bind(null, tracker.id)}
           submitLabel="Save and continue"
         >
           <div className="grid gap-4 sm:grid-cols-2">
             {select("date", "Date (planned date)", columns.date)}
+            {select("endDate", "End date (optional)", columns.endDate, {
+              none: "No end date column",
+              hint: END_DATE_HINT,
+            })}
             {select("title", "Title", columns.title)}
             {select("statusRead", "Status (read)", columns.statusRead)}
             {select("statusWrite", "Status (write)", columns.statusWrite, {

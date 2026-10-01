@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
 
+import { BrandMark } from "@/components/brand-mark";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -60,9 +61,10 @@ export function TopBar({
       <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2">
         <Link
           href="/"
-          className="text-lg font-semibold tracking-tight"
+          className="flex items-center gap-2 text-lg font-semibold tracking-tight"
           aria-label="Knit, Today"
         >
+          <BrandMark />
           Knit
         </Link>
         <span className="text-sm text-muted-foreground">{dateLabel}</span>

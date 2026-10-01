@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 
+import { BrandMark } from "@/components/brand-mark";
 import { LoginForm } from "@/components/login-form";
 import { getCurrentUser, getSupabase } from "@/lib/supabase/server";
 import { firstParam, safeNextPath } from "@/lib/url";
@@ -27,7 +28,10 @@ export default async function LoginPage({
   return (
     <main className="flex flex-1 items-center justify-center px-4 py-12">
       <div className="w-full max-w-sm rounded-xl border bg-card p-6 shadow-sm">
-        <h1 className="text-2xl font-semibold tracking-tight">Knit</h1>
+        <h1 className="flex items-center gap-2.5 text-2xl font-semibold tracking-tight">
+          <BrandMark className="h-7" />
+          Knit
+        </h1>
         <p className="mt-1 mb-6 text-sm text-muted-foreground">
           Sign in with the email and password the admin gave you.
         </p>

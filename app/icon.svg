@@ -1,4 +1,8 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <rect width="64" height="64" rx="14" fill="#171717"/>
-  <path d="M20 16v32M20 34l16-18M26 28l14 20" fill="none" stroke="#fafafa" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-18 0 136 136">
+  <style>
+    .dark { fill: #212121; }
+    @media (prefers-color-scheme: dark) { .dark { fill: #f5f5f5; } }
+  </style>
+  <polygon points="0,0 94,0 94,107" fill="#77cb35"/>
+  <polygon class="dark" points="6,30 6,136 100,136"/>
 </svg>

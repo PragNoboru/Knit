@@ -169,6 +169,27 @@ describe("draft and activation (11)", () => {
     ]);
   });
 
+  it("refuses a draft whose write target is the End date, or whose End date is the Date (N64)", () => {
+    // Noboru writes its status to "Done" and has no completed-on column; "Notes" stands in.
+    const expected = TrackerConfig.parse(byName("Noboru · CA Campaign"));
+    const never = (header: string) =>
+      `"${header}" is the planned end date, which Knit never changes. Choose another column to write to.`;
+    const cases: [Partial<DraftConfig["columns"]>, string][] = [
+      [{ endDate: "Done" }, never("Done")],
+      [{ completedOn: "Notes", endDate: "Notes" }, never("Notes")],
+      [{ endDate: "Date" }, END_DATE_SAME_AS_DATE],
+    ];
+    for (const [columns, problem] of cases) {
+      const draft: DraftConfig = {
+        ...expected,
+        columns: { ...expected.columns, ...columns },
+      };
+      expect(draftProblems(draft, { unmappedWords: [] })).toEqual([
+        { step: "columns", problem },
+      ]);
+    }
+  });
+
   it("turns a finished draft into the tracker's registry", () => {
     const expected = TrackerConfig.parse(byName("Noboru · CA Campaign"));
     const draft: DraftConfig = {

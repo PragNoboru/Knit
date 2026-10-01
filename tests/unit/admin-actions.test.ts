@@ -513,6 +513,43 @@ describe("activate (11 step 9)", () => {
     expect(rpcNames()).not.toContain("set_tracker_state");
   });
 
+  it("is refused, saving nothing, when a saved draft writes to the End date (N64)", async () => {
+    const PLANNED_END =
+      '"Done on" is the planned end date, which Knit never changes. Choose another column to write to.';
+    fx.sheetTrackers = [{}];
+    fx.tracker = trackerWith("draft", {
+      ...META,
+      columns: { ...META.columns, endDate: "Done on" },
+    });
+    expect((await actions.activateTracker(TRACKER_ID)).error).toBe(PLANNED_END);
+    fx.tracker = trackerWith("draft", {
+      ...META,
+      columns: { ...META.columns, endDate: "Date" },
+    });
+    expect((await actions.activateTracker(TRACKER_ID)).error).toBe(
+      "Date and End date must be different columns.",
+    );
+    expect(savedConfigs()).toEqual([]);
+    expect(fx.sheet).not.toContain("ensureKnitColumns");
+    expect(rpcNames()).not.toContain("set_tracker_state");
+  });
+
+  it("no later step saves a draft that writes to the End date (N64)", async () => {
+    fx.tracker = trackerWith("draft", {
+      ...META,
+      columns: { ...META.columns, endDate: "Status" },
+    });
+    const form = new FormData();
+    form.set("ownerFilter", "all");
+    form.set("offDayPolicy", "keep");
+    expect(
+      (await actions.saveOwners(TRACKER_ID, { error: null }, form)).error,
+    ).toBe(
+      '"Status" is the planned end date, which Knit never changes. Choose another column to write to.',
+    );
+    expect(savedConfigs()).toEqual([]);
+  });
+
   const goLiveWritten = () =>
     fx.calls.find((c) => c.table === "trackers" && c.op === "update")
       ?.payload as { go_live_date?: string } | undefined;

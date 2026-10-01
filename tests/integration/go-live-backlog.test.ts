@@ -194,9 +194,40 @@ describe("Bring to today refreshes the sheet's Knit Note (N63, N17)", () => {
       )
     ).map((r) => r.note_only);
 
+  const payloads = async () =>
+    (
+      await db().query<{ payload: unknown; state: string }>(
+        `select payload, state from outbox
+         where task_id = $1 and state in ('pending', 'held') order by id`,
+        [task],
+      )
+    ).map((r) => [r.state, r.payload]);
+
   it("queues a note-only write-back in the same call", async () => {
     await bring(db(), admin, task);
     expect(await queued()).toEqual([true]);
+    expect(await payloads()).toEqual([["pending", { note_only: true }]]);
+  });
+
+  it("queues one for a task of a paused tracker (N17: active or paused); the push holds it until Resume", async () => {
+    await db().query(
+      "update trackers set state = 'paused' where id = (select tracker_id from tasks where id = $1)",
+      [task],
+    );
+    await bring(db(), admin, task);
+    expect(await payloads()).toEqual([["pending", { note_only: true }]]);
+  });
+
+  it("queues none when a held write-back is waiting: that push writes the note too", async () => {
+    await db().query(
+      `insert into outbox (task_id, tracker_id, payload, state)
+       select id, tracker_id, '{"status_value": "In progress"}'::jsonb, 'held' from tasks where id = $1`,
+      [task],
+    );
+    await bring(db(), admin, task);
+    expect(await payloads()).toEqual([
+      ["held", { status_value: "In progress" }],
+    ]);
   });
 
   it("queues none when a write-back is already waiting: that push writes the note too", async () => {
@@ -298,7 +329,9 @@ describe("Bring to today never on an off day (N61)", () => {
 // Pulled forward and Done early leave out backlog task-days, and the row's "Done early" label
 // compares with the task's due date as the note does. The first tests pin today's behaviour;
 // the last, an expected failure, states what any answer must give (the row and the note
-// agree). When Q7 is decided, replace them.
+// agree). When Q7 is decided, replace them. N61 gives a second path to the same case: Bring to
+// today used on an off day after go-live puts the task-day on the next working day, also in the
+// future (pinned at the end of this file); Q7's text names only the path before go-live.
 describe("A brought task before go-live on Today (PRD Q7, open)", () => {
   const db = useTestDb();
   let member: string;
@@ -386,4 +419,29 @@ describe("A brought task before go-live on Today (PRD Q7, open)", () => {
       );
     },
   );
+});
+
+// PRD Q7 (open), the off-day path: after go-live, Bring to today on a Sunday puts the overdue
+// task's task-day on Monday (N61), so on that Sunday Today lists it under Pulled forward, as
+// for a task brought before go-live. Pinned until Q7 is decided.
+describe("A task brought on an off day after go-live on Today (PRD Q7, open)", () => {
+  const db = useTestDb();
+
+  it("Q7, until decided: on the Sunday it was brought, it shows under Pulled forward", async () => {
+    const { admin, member, task } = await backlogRow(db(), GO_LIVE);
+    await setToday(db(), "2026-10-04"); // Sun
+    await bring(db(), admin, task);
+    expect((await taskDays(db(), task)).map((d) => d.day)).toEqual([
+      "2026-10-05",
+    ]);
+
+    const [row] = await queryAs<{ v: unknown }>(
+      db(),
+      { kind: "user", id: member },
+      "select day_view(null) as v",
+    );
+    const view = DayViewData.parse(row!.v);
+    expect(view.rows).toEqual([]);
+    expect(view.pulledForward.map((c) => c.taskId)).toEqual([task]);
+  });
 });

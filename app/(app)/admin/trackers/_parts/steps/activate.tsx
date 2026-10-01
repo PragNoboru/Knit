@@ -4,15 +4,13 @@ import { ActionForm } from "@/components/admin/action-form";
 import { Section } from "@/components/admin/fields";
 import { activateTracker } from "@/lib/actions/admin";
 import {
-  loadSheetDeps,
+  currentGoLive,
   unmappedStatusWords,
   type AdminTracker,
 } from "@/lib/admin/data";
-import { calendarFromDays } from "@/lib/domain/calendar";
 import {
   draftProblems,
   GO_LIVE_NEEDS_A_DATE,
-  goLiveDefault,
   WIZARD_STEPS,
 } from "@/lib/domain/wizard";
 
@@ -21,16 +19,12 @@ import {
 // has no Knit status. Step 7 (N42): with no saved go-live and no calendar day to default to,
 // the admin is sent back to choose a date, as activateTracker would refuse.
 export async function ActivateStep({ tracker }: { tracker: AdminTracker }) {
-  const { store } = await loadSheetDeps();
-  const [unmappedWords, today, context] = await Promise.all([
+  const [unmappedWords, goLive] = await Promise.all([
     unmappedStatusWords(tracker),
-    store.today(),
-    store.loadContext(),
+    currentGoLive(tracker),
   ]);
   const problems = draftProblems(tracker.draft, { unmappedWords });
-  if (
-    goLiveDefault(tracker, today, calendarFromDays(context.calendar)) === null
-  )
+  if (goLive === null)
     problems.push({ step: "details", problem: GO_LIVE_NEEDS_A_DATE });
   const titleOf = (step: string) =>
     WIZARD_STEPS.find((s) => s.step === step)?.title ?? step;

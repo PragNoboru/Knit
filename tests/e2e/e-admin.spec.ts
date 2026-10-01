@@ -133,12 +133,27 @@ test("the wizard connects a new sheet end to end", async ({ page }, info) => {
       timeout: 60_000,
     },
   );
+  const trackerId = /\/admin\/trackers\/([0-9a-f-]{36})/.exec(page.url())![1]!;
   if (page.url().endsWith("/backlog")) {
+    // Go-live is tomorrow (Thu 1 Oct), so Bring to today, the default action, would put the
+    // row on a day that closes as not done before go-live. docs/RUNBOOK.md section 4 step 5
+    // says not to use it before the go-live day; Mark done is safe on any day.
     const first = page.locator('input[name="taskId"]').first();
     await first.check();
+    await page
+      .getByRole("combobox", { name: "Action", exact: true })
+      .selectOption("mark_done");
     await page.getByRole("button", { name: "Apply to selected" }).click();
     await expect(page.getByText(/^1 task updated\.$/)).toBeVisible();
   }
+
+  // Activation stored the go-live step 7 showed (N42).
+  await page.goto(`/admin/trackers/${trackerId}`);
+  await expect(
+    page
+      .locator("dt", { hasText: /^Go-live$/ })
+      .locator("xpath=following-sibling::dd[1]"),
+  ).toHaveText("Thu 1 Oct");
 
   await page.goto("/admin/trackers");
   const row = page

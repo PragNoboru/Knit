@@ -2,16 +2,17 @@ import { ActionForm } from "@/components/admin/action-form";
 import { Field, Section, TextInput } from "@/components/admin/fields";
 import { TrackerChip } from "@/components/tracker-chip";
 import { saveDetails } from "@/lib/actions/admin";
-import { loadSheetDeps, type AdminTracker } from "@/lib/admin/data";
-import { calendarFromDays } from "@/lib/domain/calendar";
-import { goLiveDefault } from "@/lib/domain/wizard";
+import { currentGoLive, type AdminTracker } from "@/lib/admin/data";
+import { goLiveSaved } from "@/lib/domain/wizard";
 import { TRACKER_COLORS } from "@/lib/domain/cards";
 
 // PRD 11 step 7: name, colour from the 8-colour palette, go-live (defaults to the next working
 // day; D1, N42). With no saved date and no calendar day to default to, the date is left empty.
+// The hint describes the date shown: the default, the missing default, or a saved date, which
+// may be any date (N42).
 export async function DetailsStep({ tracker }: { tracker: AdminTracker }) {
   const draft = tracker.state === "draft";
-  const goLive = await shownGoLive(tracker);
+  const goLive = await currentGoLive(tracker);
   return (
     <Section title="Name, colour and go-live">
       <ActionForm
@@ -34,9 +35,11 @@ export async function DetailsStep({ tracker }: { tracker: AdminTracker }) {
             hint={
               !draft
                 ? "Fixed once the tracker is live."
-                : goLive === null
-                  ? "The working-day calendar does not reach the next working day yet, so choose a date. Rows due before it are history only."
-                  : "Defaults to the next working day. Rows due before this date, today's included, are history only; the backlog review can bring them forward."
+                : goLiveSaved(tracker)
+                  ? "Rows due before this date are history only; the backlog review can bring them forward."
+                  : goLive === null
+                    ? "The working-day calendar does not reach the next working day yet, so choose a date. Rows due before it are history only."
+                    : "Defaults to the next working day. Rows due before this date, today's included, are history only; the backlog review can bring them forward."
             }
           >
             <TextInput
@@ -69,16 +72,4 @@ export async function DetailsStep({ tracker }: { tracker: AdminTracker }) {
       </ActionForm>
     </Section>
   );
-}
-
-/** The date step 7 shows: the saved one, else the default, which needs today and the calendar. */
-async function shownGoLive(tracker: AdminTracker) {
-  if (tracker.state !== "draft" || tracker.draft.goLiveChosen)
-    return tracker.goLiveDate;
-  const { store } = await loadSheetDeps();
-  const [today, context] = await Promise.all([
-    store.today(),
-    store.loadContext(),
-  ]);
-  return goLiveDefault(tracker, today, calendarFromDays(context.calendar));
 }

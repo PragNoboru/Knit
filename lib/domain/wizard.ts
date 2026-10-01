@@ -437,6 +437,17 @@ export const GO_LIVE_NEEDS_A_DATE =
   "Choose a go-live date at step 7: the working-day calendar does not reach the next working day yet.";
 
 /**
+ * 11 step 7 (N42, N19 b): the tracker's go-live is a date already settled, the one saved at
+ * step 7 or the date of a tracker no longer a draft, rather than the default worked out now.
+ */
+export function goLiveSaved(tracker: {
+  state: string;
+  draft: DraftConfig;
+}): boolean {
+  return tracker.state !== "draft" || tracker.draft.goLiveChosen === true;
+}
+
+/**
  * 11 step 7 (N42, 6.2): until the admin saves a date at step 7, go-live is the first working
  * day after today, worked out from the day the admin is at step 7, the preview or the activate
  * step, or activates, not the day setup started. Null when the calendar does not cover that
@@ -448,8 +459,7 @@ export function goLiveDefault(
   today: LocalDate,
   calendar: WorkingCalendar,
 ): LocalDate | null {
-  if (tracker.state !== "draft" || tracker.draft.goLiveChosen)
-    return tracker.goLiveDate;
+  if (goLiveSaved(tracker)) return tracker.goLiveDate;
   try {
     return calendar.nextWorkingDay(today);
   } catch (error) {

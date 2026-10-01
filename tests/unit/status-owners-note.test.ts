@@ -126,6 +126,22 @@ describe("heldSourceStatus: a word the row still shows keeps its recorded status
     }
   });
 
+  it("reads a word removed from the map as unmapped, even beside a recorded Done (invariant 7, N34)", () => {
+    const statusMap = Object.fromEntries(
+      Object.entries(googleAds.statusMap).filter(([word]) => word !== "done"),
+    );
+    const removed = TrackerConfig.parse({ ...googleAds, statusMap });
+    const unmapped = mapSourceStatus("Done", removed);
+    expect(unmapped.mapped).toBe(false);
+    expect(
+      heldSourceStatus(
+        unmapped,
+        { statusKey: "done", status: "done", completedOn: "2026-09-28" },
+        removed,
+      ),
+    ).toBe(unmapped);
+  });
+
   it("gives a recorded Cancelled its word's configured reason, or null when the config has none", () => {
     const moved = { statusKey: "moved", status: "cancelled" as const };
     const remappedMoved = TrackerConfig.parse({

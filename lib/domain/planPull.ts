@@ -457,9 +457,32 @@ class Planner {
       [...openDays].reverse().find((d) => d.day < this.today) ??
       null;
 
+    // N60: when the first mapping is the sheet's only change, a task no longer at the Yet to
+    // Start the unmapped word stood for was changed in Knit since it was read (to a status the
+    // push leaves unwritten, N8, or beside a status-read column Knit does not write, N23, so
+    // its hub change has cleared). Knit's change still wins, with a conflict when the word now
+    // means another status. The snapshot records the word's mapping, so this is raised once.
+    const knitKept =
+      firstMapped &&
+      !task.hubChanged &&
+      task.status !== "yet_to_start" &&
+      row.snapshot.statusKey === snapshot.statusKey &&
+      row.snapshot.completedOn === snapshot.completedOn;
+
     let status = task.status;
     let applied = false;
-    if (sourceChanged && !task.hubChanged) {
+    if (knitKept) {
+      if (source.status !== task.status) {
+        this.attention("conflict", task.id, task.id, {
+          knit: task.status,
+          source: source.status,
+          sourceWord: row.statusRaw,
+        });
+        this.plan.stats.conflicts += 1;
+      }
+      set.sourceSnapshot = row.snapshot;
+      sourceSynced = true;
+    } else if (sourceChanged && !task.hubChanged) {
       const incoming = this.statusFieldsFrom(row, source);
       const reopening =
         isFinal(task.status) &&

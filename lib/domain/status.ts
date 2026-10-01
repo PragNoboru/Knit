@@ -61,9 +61,11 @@ export function mapSourceStatus(
  * last read or wrote (source_snapshot), it stands for the Knit status recorded with it, not
  * for what the current status map says, so a remapped word changes no existing task. The
  * current map applies to a word that differs from the snapshot, to a word recorded as unmapped
- * (null, N60), and when there is no snapshot or it predates the recorded status. A held
- * Cancelled takes its word's configured reason when there is one. Type-only import of rows.ts:
- * rows.ts imports this module at runtime.
+ * (null, N60), and when there is no snapshot or it predates the recorded status. A word that is
+ * not in the status map now is read as unmapped, whatever was recorded: it still pauses and
+ * tells (invariant 7), and the mismatch check counts it (N34). A held Cancelled takes its
+ * word's configured reason when there is one. Type-only import of rows.ts: rows.ts imports
+ * this module at runtime.
  */
 export function heldSourceStatus(
   read: SourceStatus,
@@ -71,6 +73,7 @@ export function heldSourceStatus(
   config: TrackerConfig,
 ): SourceStatus {
   if (
+    !read.mapped ||
     snapshot === null ||
     snapshot.statusKey !== read.key ||
     snapshot.status === undefined ||

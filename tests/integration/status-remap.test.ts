@@ -252,6 +252,18 @@ describe("the nightly mismatch check after a remap (PRD N34, N28)", () => {
     expect(await check()).toBe(1);
   });
 
+  it("a word removed from the map is a mismatch, whatever was recorded with it (N34)", async () => {
+    await mapWord("copy ready", "done");
+    await pull();
+    await source.setCell(ctx.ref, 1, G01_ROW, "Status", "Copy ready");
+    await pull();
+    await db().query(
+      "update trackers set config = config #- '{statusMap,copy ready}' where id = $1",
+      [ctx.trackerId],
+    );
+    expect(await check()).toBe(1);
+  });
+
   it("a word unmapped when read is read through the current map once mapped", async () => {
     await pull();
     await source.setCell(ctx.ref, 1, G01_ROW, "Status", "Copy ready");

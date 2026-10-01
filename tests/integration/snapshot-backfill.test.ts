@@ -57,6 +57,7 @@ describe("migration: snapshots of unmapped words record null (N28, N60)", () => 
     trackers.unmapped = await createTracker(db());
     trackers.mapped = await mappedSince(db(), "active");
     trackers.draft = await mappedSince(db(), "draft");
+    trackers.quiet = await createTracker(db());
     ids.unmapped = await taskWith(db(), trackers.unmapped, {
       statusKey: "copy ready",
       status: "yet_to_start",
@@ -81,6 +82,11 @@ describe("migration: snapshots of unmapped words record null (N28, N60)", () => 
       status: "yet_to_start",
       completedOn: null,
     });
+    ids.quiet = await taskWith(db(), trackers.quiet, {
+      statusKey: "not started",
+      status: "yet_to_start",
+      completedOn: null,
+    });
   });
 
   const snapshots = async () =>
@@ -95,18 +101,20 @@ describe("migration: snapshots of unmapped words record null (N28, N60)", () => 
         }),
       ),
     );
-  const requested = async () =>
+  const counter = (column: "pull_requested" | "state_version") => async () =>
     Object.fromEntries(
       await Promise.all(
         Object.entries(trackers).map(async ([name, id]) => {
           const [row] = await db().query<{ n: string }>(
-            "select pull_requested::text as n from trackers where id = $1",
+            `select ${column}::text as n from trackers where id = $1`,
             [id],
           );
           return [name, Number(row!.n)] as const;
         }),
       ),
     );
+  const requested = counter("pull_requested");
+  const versions = counter("state_version");
 
   it("nulls unmapped and first-mapped words, keeps Yet to Start, and owes a pull only where a word was mapped", async () => {
     const before = await requested();
@@ -126,21 +134,43 @@ describe("migration: snapshots of unmapped words record null (N28, N60)", () => 
       legacy: nullStatus("copy ready"),
       mapped: nullStatus("copy ready"),
       draft: nullStatus("copy ready"),
+      quiet: {
+        statusKey: "not started",
+        status: "yet_to_start",
+        completedOn: null,
+      },
     });
     expect(await requested()).toEqual({
       unmapped: before.unmapped,
       mapped: before.mapped! + 1,
       draft: before.draft,
+      quiet: before.quiet,
+    });
+  });
+
+  it("moves the state_version of every tracker whose snapshots changed, so a pull planned before it retries (9.1)", async () => {
+    const before = await versions();
+    await db().query(MIGRATION);
+    expect(await versions()).toEqual({
+      unmapped: before.unmapped! + 1,
+      mapped: before.mapped! + 1,
+      draft: before.draft! + 1,
+      quiet: before.quiet,
     });
   });
 
   it("running it again changes nothing", async () => {
     await db().query(MIGRATION);
-    const once = { snapshots: await snapshots(), requested: await requested() };
+    const once = {
+      snapshots: await snapshots(),
+      requested: await requested(),
+      versions: await versions(),
+    };
     await db().query(MIGRATION);
     expect({
       snapshots: await snapshots(),
       requested: await requested(),
+      versions: await versions(),
     }).toEqual(once);
   });
 });

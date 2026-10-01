@@ -89,7 +89,7 @@ The source trackers stay the place where work is planned. Knit is the place wher
 
 Status: **Adopted** = settled. **Default** = adopted as the default because the owner has not confirmed yet; build it exactly as written, and make it a config value where noted so it can change without code.
 
-On 28 Sep 2026 Pragaman confirmed every decision then marked Default (D1 to D9, N1 to N19) as Adopted. N20 to N58 record how the fixes from the Phase 1 audit and its review (28 Sep 2026) behave where the PRD was silent; they are Defaults until confirmed. On 1 Oct 2026 Pragaman adopted N20 to N58 as built, except N28, N30 and N42, which he changed as their rows now say (N24, N34 and N54 follow from those changes); N59 and N60 are the Defaults those changes needed. The same day he resolved Q6 (N15, 6.10) and settled D15.
+On 28 Sep 2026 Pragaman confirmed every decision then marked Default (D1 to D9, N1 to N19) as Adopted. N20 to N58 record how the fixes from the Phase 1 audit and its review (28 Sep 2026) behave where the PRD was silent; they are Defaults until confirmed. On 1 Oct 2026 Pragaman adopted N20 to N58 as built, except N28, N30 and N42, which he changed as their rows now say (N24, N34 and N54 follow from those changes); N59 and N60 are the Defaults those changes needed. The same day he resolved Q6 (N15, 6.10) and settled D15. On 1 Oct 2026 Pragaman also approved an optional End date column (A) and a wizard preset for the Knit Standard Tracker v1 (B), the template every brand's tracker uses from Phase 2 go-live on Tue 13 Oct 2026; N64 to N70 are the Defaults that carry them out.
 
 | # | Decision | Rule | Status |
 | --- | --- | --- | --- |
@@ -171,6 +171,13 @@ On 28 Sep 2026 Pragaman confirmed every decision then marked Default (D1 to D9, 
 | N61 | Bring to today never before go-live or on an off day (6.11, amends N42) | Bring to today creates the task-day on the first working day on or after the later of today and the tracker's go-live date. While go-live is ahead (the backlog review opens at activation, and go-live defaults to the next working day) that is the go-live date, or the working day after it when go-live is an off day; from go-live on it is today, or the next working day when today is an off day. So no task-day lands before go-live or on an off day, and no close records a miss for a task brought there | Default |
 | N62 | Spill counts in the open Knit Note (6.9, amends N38) | In "Spilled {n}x · now due {date}", n is the spill index of the task's open task-day, and task-days a correction cancelled never count, as in the Done note (N38) | Default |
 | N63 | The Knit Note after Bring to today (6.11, N17) | Bring to today queues a note-only write-back (N17 rules) for each task it brings, in the same transaction, so the sheet's Knit Note stops saying "Before Knit go-live" before the task's first close | Default |
+| N64 | An End date column (8.2, 6.3.4, amends N42; approved 1 Oct 2026) | A tracker may map an optional End date column (`columns.endDate`, default null). With it, a row's Date and End date make one planned date (6.3.4): Date is the first day, End date the last, and a blank End date is a one-day task. A tracker that maps no End date reads its dates exactly as before (6.3.1 to 6.3.3). The End date column is a mapped header for the structure check (10.2 step 2: missing or doubled, the tracker pauses), counts as content when deciding whether a row is empty (10.2 step 3, N51), and may hold formulas because Knit only reads it. N42's list of columns that can never be a write target gains the End date, and Date and End date must be different columns | Default |
+| N65 | Reading Date with End date (6.3.4) | End date blank: Date alone decides (6.3.2), so a text window or open date in Date still works. End date filled and Date blank: invalid `end_without_start`. Date invalid: invalid with the Date's own reason. Date a window or open-ended: invalid `start_not_single`. The End date must be one date in a single-date form of 6.3.2 (a real date cell, else step 4); a range, an open date, an impossible date, a weekday that matches no year, or text Knit cannot read is invalid `end_date_unreadable`. A missing year follows N36 with Date and End date as the two ends: a real date cell has a year; the side with a year is read first and the other takes its year around it, else the only side with a weekday, else the End date. End date before Date: invalid `range_end_before_start` (also when a weekday puts the End date in the previous year: Date 13 Oct 2026 with "Fri 17 Oct" reads 17 Oct 2025). The same day: `single`. Later: `window` with planned_start the Date and planned_end the End date, due on its last day after the off-day policy (6.3.3) and under Ongoing from its first working day (N4). An invalid pair is a bad date (6.6, 14): a new row is skipped and an existing task keeps its last good dates, with `bad_date` either way | Default |
+| N66 | planned_raw with an End date (6.3.4, 12.6, N19 e) | When the End date is blank, or the tracker maps none, planned_raw is the Date cell's text as the sheet shows it. When the End date is filled it is "{Date text} to {End date text}" ("to {End date text}" when Date is blank), also when both are the same day. The drawer shows it beside the parsed dates, a bad_date item quotes it, and recreating the Knit ID column (N19 e) matches title and planned date by this same text, built from the row by the same function | Default |
+| N67 | End date edited in the sheet (6.6, N29, N44) | Adding, changing or clearing a row's End date is a planned date move: planned_start, planned_end, the date kind and the due date follow, and the open task-day moves under 6.6 (to the new due date, or to today as a spillover with past_date_added when that date has passed), never while it waits for its day's close (N29). A change that keeps the due date (an End date moved from Sun 25 Oct to Sat 24 Oct is still due Fri 23 Oct) changes only those fields and planned_raw: no task-day moves and no event is written. An End date made invalid follows "Date cell becomes invalid". Mapping or unmapping the End date column on a live tracker is a config change (N44): open task-days move to their new due dates on the next pull, locked history stays as it is | Default |
+| N68 | Standard setup (11.1, approved 1 Oct 2026) | On the header row step (11 step 3) of a tracker being set up, the wizard offers Use the standard setup when all of these hold: row 1 begins with every header of a standard template in its order (columns A to N for v1, normalised as the structure check matches headers); no later cell of row 1 repeats one of them; and neither of the template's write targets (Status, Done on) holds formulas (N6). Columns after the template's last header (brand columns, Knit ID, Knit Note) do not matter. It saves the header row, columns, templates, detail columns, statuses, write-back words, cancel reasons (none) and owner policies in one go (table in 11.1), as the steps would save them. It then opens step 6, Owners and policies (or step 5, N69), where unknown owner names are listed as usual; steps 7 to 9 follow, every step stays editable, and nothing is written to the sheet before activation. Name, colour and go-live are not touched. Only a draft is offered it; a live tracker's mapping is edited step by step. The rules live in `lib/domain/standard-template.ts` | Default |
+| N69 | Standard setup statuses (11.1, N42, amends N19 a) | The preset maps the template's five status words and a blank cell (blank to Yet to Start), and no other word. Words match normalised, and each write-back word takes the spelling the Status column offers (its dropdown, else the words in it, N42). When the column holds a word outside the five, or does not offer one of the five, the preset still saves what it filled but opens step 5, Map statuses, which names what is left; activation stays blocked until every word is mapped and every write-back value is chosen (N42). Step 5 lists a blank cell when a row has one or when the status map already maps it, so saving the step again keeps the blank mapping. A word typed into the sheet after activation is an unmapped status as usual (6.8) | Default |
+| N70 | Standard template versions (11.1) | Each template version is a fixed definition in `lib/domain/standard-template.ts`, starting with Knit Standard Tracker v1 (`knit-standard-v1`). A later version is added beside it, never changed in place, and the wizard offers the newest version row 1 matches. The preset only fills the draft: a tracker's saved registry (8.2) records no template, so a new template version never changes a connected tracker, whose mapping changes only through Edit mapping | Default |
 
 ---
 
@@ -220,10 +227,10 @@ Holidays (loaded from `fixtures/holidays.json` by a migration, so every environm
 #### 6.3.1 Date kinds
 | Kind | Example | Fields |
 | --- | --- | --- |
-| `single` | real date cell, "Mon 28 Sep", "28/09/2026" | `planned_start` |
-| `window` | "1-6 Oct", "28 Sep to 2 Oct" | `planned_start`, `planned_end` |
+| `single` | real date cell, "Mon 28 Sep", "28/09/2026"; with an End date column (6.3.4), a Date whose End date is blank or the same day | `planned_start` |
+| `window` | "1-6 Oct", "28 Sep to 2 Oct"; Date 12 Oct with End date 16 Oct (6.3.4) | `planned_start`, `planned_end` |
 | `open` | "From 30 Oct", "30 Oct onwards" | `planned_start` |
-| `invalid` | "TBD", "Sat 28 Sep" (weekday mismatch) | none; raises Needs Attention |
+| `invalid` | "TBD", "Sat 28 Sep" (weekday mismatch); an End date before its Date, one Knit cannot read as one date, or one without a Date (6.3.4) | none; raises Needs Attention |
 | `empty` | blank cell | row skipped unless it already exists as a task (then Needs Attention) |
 
 #### 6.3.2 Parser
@@ -253,6 +260,24 @@ All cases in `fixtures/date-parser.cases.json` must pass (reference today 2026-0
 Examples from the real trackers under the default policy: Noboru row planned Fri 2 Oct (Gandhi Jayanti) is due Thu 1 Oct. Sapiens post planned Sun 25 Oct is due Fri 23 Oct, because Sat 24 Oct is a 4th Saturday. Sapiens post planned Sun 8 Nov (Diwali) is due Sat 7 Nov, a 1st Saturday.
 
 Ongoing visibility: a window task appears under Ongoing on every working day from `max(planned_start, first working day)` until done or until its due date, when it appears in Due today. An open task appears under Ongoing from its start date until done.
+
+A window made from Date and End date (6.3.4) is a window here like any other: due on its last day after the off-day policy, under Ongoing from its first working day.
+
+#### 6.3.4 Date and End date (N64 to N67)
+A tracker may map an End date column. Without one, this section does not apply. With one, the pure function `parsePlannedRange(dateCell, endCell, today)` in `lib/domain/dates.ts` reads the pair:
+
+| Date | End date | Result |
+| --- | --- | --- |
+| any | blank | The Date alone, as 6.3.2 |
+| blank | filled | `invalid: end_without_start` |
+| invalid | filled | `invalid` with the Date's reason |
+| a window or open-ended | filled | `invalid: start_not_single` |
+| single | not one date (text Knit cannot read, a range, an open date, an impossible date, a weekday that matches no year) | `invalid: end_date_unreadable` |
+| single | before the Date | `invalid: range_end_before_start` |
+| single | the same day | `single` |
+| single | a later day | `window`: `planned_start` = Date, `planned_end` = End date |
+
+Years follow N36 with the Date and End date as the two ends: a real date cell has its year; the side with a year is read first and the other takes its year around it (step 5 with that side in place of today), else the only side with a weekday, else the End date. A weekday can put an End date in the previous year (Date 13 Oct 2026 with "Fri 17 Oct" reads 17 Oct 2025), which is then before its Date. `planned_raw` is the Date's text when the End date is blank, else "{Date text} to {End date text}" (N66). End date cases are in `fixtures/date-parser.cases.json` under `endDateCases` and must all pass (reference today 2026-09-25).
 
 ### 6.4 Task-days, spillover and day close
 
@@ -289,6 +314,8 @@ Worked example (Filing Buddy task G21, planned Wed 30 Sep, `in_progress` when th
 | Marked done in the sheet | Current open task-day becomes `done`; `completed_on` = the tracker's completed-on value if mapped and not in the future, else today |
 | Planned date moved, task open, new due date today or later | The open task-day moves to the new due date |
 | Planned date moved into the past, task open | The open task-day moves to today as a spillover; Needs Attention item `past_date_added` |
+| End date added, changed or cleared (N67) | A planned date move: the two rows above apply to the new due date (the window's last day, or the Date when the End date is cleared). When the due date stays the same, only the date fields and planned_raw change |
+| End date becomes invalid (before its Date, unreadable, or the Date cleared) | As "Date cell becomes invalid" (N65) |
 | New row with a due date already past (after go-live) | Created with a task-day on today as spillover (`spill_index = 1`); Needs Attention `past_date_added` |
 | Row deleted | `removed_at_source` set. Open task-days become `cancelled`, reason "Removed at source". Locked history untouched |
 | Row restored (its Knit ID belongs to a task removed at source) | Treated as a new row: it gets a new Knit ID and a new task under the rules above. The removed task and its history stay as they are (N30) |
@@ -483,7 +510,7 @@ create table tasks (
   title text not null,
   subtitle text,
   details jsonb not null default '{}',
-  planned_raw text,
+  planned_raw text,                           -- the Date cell's text, or "{Date} to {End date}" (N66)
   date_kind date_kind,
   planned_start date,
   planned_end date,
@@ -603,7 +630,8 @@ create table returned_rows (                -- N59: new Knit IDs given to rows t
 const TrackerConfig = z.object({
   headerRow: z.number().int().min(1),
   columns: z.object({
-    date: z.string(), title: z.string(),
+    date: z.string(), endDate: z.string().nullable().default(null),   // N64: optional last day of a window; never written
+    title: z.string(),
     statusRead: z.string(), statusWrite: z.string().nullable(),
     completedOn: z.string().nullable(), owner: z.string().nullable(), sourceRef: z.string().nullable(),
     critical: z.object({ header: z.string(), truthy: z.array(z.string()) }).nullable(),
@@ -622,7 +650,7 @@ const TrackerConfig = z.object({
                               z.object({ type: z.literal("text"), pattern: z.string() }), z.null()]),
 });
 ```
-Templates reference headers in braces; missing values render as empty and the separator collapses. `fixtures/trackers.config.json` holds real configs for all four example trackers.
+Templates reference headers in braces; missing values render as empty and the separator collapses. `fixtures/trackers.config.json` holds real configs for the four example trackers and for `Knit_Standard_Tracker_v1_example`, an example in the Knit Standard Tracker v1 layout (11.1), which is not a real tracker.
 
 ---
 
@@ -670,7 +698,7 @@ All are `security definer`, set `search_path = public`, and check the caller the
 
 ### 10.2 Pull (per active tracker)
 1. Skip if the file's `modifiedTime` equals `last_source_modified_time` and the call is not forced.
-2. Structure check: read the header row. Every mapped header must be found (normalised match). If not: tracker `paused`, reason names the missing header, attention `missing_header`, stop. Knit ID column missing: `paused`, attention `missing_knit_id_column`, stop (it is recreated only after the admin confirms).
+2. Structure check: read the header row. Every mapped header (the End date column included, N64) must be found (normalised match). If not: tracker `paused`, reason names the missing header, attention `missing_header`, stop. Knit ID column missing: `paused`, attention `missing_knit_id_column`, stop (it is recreated only after the admin confirms).
 3. `readRows()`. Ignore rows that are empty in every mapped column.
 4. Row identity:
    - Rows with a Knit ID: match to tasks.
@@ -725,9 +753,9 @@ A Google Sheet outside the Knit folder, shared with the service account, id in `
 | --- | --- | --- |
 | 1 | New sheet found list | Only native Google Sheets in the Knit folder. Actions: Set up, Ignore |
 | 2 | Pick tab | Tabs listed by title; stored by `sheetId`. A tab already connected is shown as such |
-| 3 | Header row | First 10 rows shown; the first mostly-text row is suggested; admin confirms |
-| 4 | Map columns | Dropdowns of headers for Date, Title (or a title template), Status read, Status write, Completed on, Owner, Source ID, Critical flag (+ truthy values), up to 8 detail columns. Formula columns are labelled "formula, read-only" and disabled as write targets. Sample values from 5 rows beside each choice. The date column shows a parse rate; under 90% shows a warning listing failing values |
-| 5 | Map statuses | Every value from the status column's dropdown rule plus every distinct value found, each with a count and a Knit status dropdown. Then a write-back value per Knit status, chosen from the dropdown options, or "leave unchanged", or "clear". Activation is blocked while any value is unmapped |
+| 3 | Header row | First 10 rows shown; the first mostly-text row is suggested; admin confirms. When row 1 holds a standard template's headers (11.1, N68), Use the standard setup is offered |
+| 4 | Map columns | Dropdowns of headers for Date, End date (optional, N64), Title (or a title template), Status read, Status write, Completed on, Owner, Source ID, Critical flag (+ truthy values), up to 8 detail columns. Formula columns are labelled "formula, read-only" and disabled as write targets. Sample values from 5 rows beside each choice. The date column shows a parse rate; under 90% shows a warning listing failing values. With an End date column, the same for the rows whose End date is filled, read with their Date (6.3.4) |
+| 5 | Map statuses | Every value from the status column's dropdown rule plus every distinct value found, each with a count and a Knit status dropdown. Then a write-back value per Knit status, chosen from the dropdown options, or "leave unchanged", or "clear". Activation is blocked while any value is unmapped. A blank cell is listed when a row has one or when the status map already maps it (N69). |
 | 6 | Owners and policies | Owner separators, owner filter, off-day policy. Unknown owner names found in the tab are listed with: link to a user, mark as non-user |
 | 7 | Name, colour, go-live | Colour from an 8-colour palette; go-live defaults to the next working day after today (6.2, N42), with no default when the calendar does not cover it; rows due before it, today's included, are history only (6.11) |
 | 8 | Preview | First 20 tasks as Today would show them, plus counts: tasks, mine, by date kind, off-day moves, invalid dates, unmapped statuses. Nothing is written yet |
@@ -735,6 +763,37 @@ A Google Sheet outside the Knit folder, shared with the service account, id in `
 | 10 | Backlog review | Section 6.11 |
 
 Editing a live tracker's mapping later: the same screens; saving runs a structure check and a forced pull. Changing a mapping never rewrites history. A word given another Knit status changes only new rows and rows that change to it after the save; a word mapped for the first time applies to every row that shows it (N28, N60). On a live tracker, unless its status columns are being changed, the statuses step says: "Giving a word another Knit status changes only rows that change to it from now on, and new rows. Tasks already showing the word keep their status. A word mapped for the first time applies to every row that shows it."
+
+### 11.1 Standard setup (N68 to N70)
+Knit Standard Tracker v1 (`knit-standard-v1`) is the template every brand's tracker uses from Phase 2 go-live. Its Tasks tab has one header row (row 1), columns A to N: Task ID, Date, End date, Task, Details / done when, Workstream, Owner, Priority, Status, Stage, Done on, Depends on, Link, Notes. Brand columns may follow Notes. Use the standard setup saves:
+
+| Setting | Value |
+| --- | --- |
+| Header row | 1 |
+| Date, End date | Date, End date |
+| Title | Task (title template `{Task}`) |
+| Status (read) and Status (write) | Status |
+| Completed on | Done on, written as a real date |
+| Owner | Owner, separator "," |
+| Source ID | Task ID |
+| Critical flag | Priority, when it says High |
+| Subtitle template | `{Task ID} · {Workstream} · {Stage}`; a blank part is left out with its separator ("FBG-21 · Review" when Workstream is blank, no subtitle when all three are blank) |
+| Detail columns | Details / done when, Workstream, Stage, Priority, Depends on, Link, Notes |
+| Statuses | Not started: Yet to Start · In progress: In Progress · Blocked: Blocked · Done: Done · Cancelled: Cancelled · blank: Yet to Start |
+| Write-back | Yet to Start: Not started · In Progress: In progress · Blocked: Blocked · Done: Done · Cancelled: Cancelled, each in the spelling the Status column offers (N69) |
+| Cancel reasons | none |
+| Owner filter, off-day policy | mine, previous_working_day |
+| Read-only columns | the tab's formula columns, as step 4 detects them |
+
+Headers are saved as the sheet spells them. The preset maps all 14 headers, so renaming, deleting or doubling any of them later pauses the tracker (10.2 step 2).
+
+Copy:
+- Step 3, when it is offered: heading "This tab follows the Knit Standard Tracker v1." Text: "Knit can fill in the columns, statuses and write-back words in one go. You then check owners, name, colour and go-live, and can still change any step." Button: "Use the standard setup".
+- Step 3, headers found but a write target holds formulas: "This tab has the Knit Standard Tracker v1 columns, but "{header}" holds formulas, so Knit cannot write to it. Set it up step by step."
+- Step 6 after the preset: "Standard setup applied. Check the owners, then name, colour and go-live."
+- Step 5 after the preset, words left: "Standard setup applied. Choose a Knit status for the words that are not in the standard list: {words}." When the column does not offer a standard word: "Standard setup applied. "{Status column}" does not offer {words}, so choose a write-back value for {Knit statuses}."
+- When the tab changed meanwhile: "This tab no longer has the Knit Standard Tracker v1 columns in row 1. Set it up step by step."
+- On a tracker that is not a draft: "Only a tracker being set up can use the standard setup."
 
 ---
 
@@ -799,7 +858,7 @@ Banners (top of Today, in priority order): yesterday not closed (admin); a track
 Every task one per row with date filters (range), tracker, status, owner (admin: Everyone toggle), and search on title. Columns: Title, Tracker, Planned, Due, Status, Spill count, Completed on. Pagination 50 per page. Used for looking up and for pulling forward.
 
 ### 12.6 Task drawer
-Title, subtitle, tracker chip, source ID, planned raw text and parsed dates, due date, owner raw text, critical flag, detail columns as label/value pairs (long text collapsible), Open in sheet link, then a timeline of task-days (date, status, spill index, reason, locked) and events (who, what, from where, when). Admin sees Request correction on locked task-days; members see Report an issue. The correction dialog reads "Done or Cancelled also closes every later day of this task. Yet to Start, In Progress or Blocked on the day a finished task ended reopens it."
+Title, subtitle, tracker chip, source ID, planned raw text (the Date, or Date to End date, N66) and parsed dates, due date, owner raw text, critical flag, detail columns as label/value pairs (long text collapsible), Open in sheet link, then a timeline of task-days (date, status, spill index, reason, locked) and events (who, what, from where, when). Admin sees Request correction on locked task-days; members see Report an issue. The correction dialog reads "Done or Cancelled also closes every later day of this task. Yet to Start, In Progress or Blocked on the day a finished task ended reopens it."
 
 ### 12.7 Empty and edge states
 | Situation | Copy | Offers |
@@ -816,6 +875,9 @@ Title, subtitle, tracker chip, source ID, planned raw text and parsed dates, due
 - Trackers: list with state, last pull, task count, open attention count; New sheet found section; Set up, Pause, Resume, Sync now, Edit mapping, Archive.
 - Sync health: last 50 `sync_runs`, outbox counts by state with Retry failed, `day_closures` for the last 14 days, calendar coverage end date.
 - Needs Attention: grouped by tracker and kind; each item shows what happened, where (row link), and actions (map status, link owner, dismiss, retry).
+- Date cannot be read (bad_date) items for an End date say "The date "{planned_raw}" cannot be used: " followed by "the End date is filled but the Date is empty." (end_without_start), "the Date is already a range or open-ended, so it cannot also have an End date." (start_not_single) or "Knit cannot read the End date as one date." (end_date_unreadable). An End date before its Date keeps "the range ends before it starts."
+- Setup wizard, step 4 (N64): the End date dropdown reads "End date (optional)" with the choice "No end date column" and the hint "Date is the first day and End date the last. A blank End date is a one-day task." Under 90% readable: "Only {n}% of the filled End dates can be read with their Date. Knit cannot read: {values}." Choosing the Date column again: "Date and End date must be different columns." As a write target: ""{header}" is the planned end date, which Knit never changes. Choose another column to write to." Standard setup copy: 11.1.
+- Tracker page mapping summary: an "End date" row after Date, showing the header or "None".
 - People: users (create, deactivate, reset password) and aliases (add, link to user, mark non-user).
 - Holidays: list, add, remove; saving calls `refresh_calendar`. Warns if a change affects task-days already created (their due dates are recomputed for unlocked task-days only).
 
@@ -832,6 +894,7 @@ Title, subtitle, tracker chip, source ID, planned raw text and parsed dates, due
 | `reportIssue` | action | taskDayId, text | Member attention item |
 | `correctTaskDay` | action (admin) | taskDayId, status, reason | RPC |
 | `trackerWizard*` | actions (admin) | per step | Uses SheetSource; saves draft config |
+| `applyStandardSetup` | action (admin) | trackerId, templateId | N68, N69: on a draft only, checks row 1 of the tab again, fills the draft from the standard template (11.1), then opens Owners and policies, or Map statuses when words or write-backs are left |
 | `activateTracker`, `pauseTracker`, `resumeTracker` | actions (admin) | trackerId | |
 | `backlogAction` | action (admin) | taskIds, action, reason? | RPC |
 | `createUser`, `deactivateUser`, `upsertAlias` | actions (admin) | | service role |
@@ -858,6 +921,7 @@ Title, subtitle, tracker chip, source ID, planned raw text and parsed dates, due
 | Sheet moved out of the folder | Tracker paused "Left the Knit folder" |
 | Non-sheet file in folder | Listed as not a Google Sheet, never synced |
 | Invalid date | Row skipped (new) or keeps last good dates (existing); attention `bad_date` |
+| End date before its Date, unreadable, or without a Date | As Invalid date: row skipped (new) or keeps last good dates (existing); attention `bad_date` (N65) |
 | Unmapped status | Treated as Yet to Start; attention `unmapped_status` |
 | Unknown owner | One attention item per name per tracker |
 | Write to protected range refused | Outbox retries then `failed`; attention `write_blocked` |
@@ -894,7 +958,7 @@ app/
   api/health/route.ts
 components/                      UI only, no business rules
 lib/
-  domain/                        pure: dates.ts, calendar.ts, status.ts, owners.ts, note.ts, templates.ts, planPull.ts
+  domain/                        pure: dates.ts, calendar.ts, status.ts, owners.ts, note.ts, templates.ts, planPull.ts, standard-template.ts
   sheets/                        SheetSource + GoogleSheetSource, XlsxFixtureSource, MemorySheetSource
   sync/                          discover.ts, pull.ts, push.ts, close.ts, structure.ts, leases.ts
   supabase/                      server, browser, service clients
@@ -915,7 +979,7 @@ docs/                            this PRD, SOW, TRACKERS, RUNBOOK (written durin
 
 ## 17. Testing
 - **Unit (Vitest)**: date parser against `fixtures/date-parser.cases.json`; working-day calendar (every date in Oct 2026 checked by hand-written expectations, including 2 Oct, 3 Oct, 10 Oct, 20 Oct, 31 Oct); due-date policy with the off-day examples in `fixtures/trackers.config.json`; status mapping incl. unmapped and blank; owner splitting ("P + Agent", "Anjan, Shlok, Pragaman"); Knit Note rendering for every row of 6.9; templates; `planPull` merge table (all four rows) and every row of 6.6.
-- **Fixture tests**: run the whole read path (XlsxFixtureSource + config + planner) over each example tracker and assert the `expected` block in `fixtures/trackers.config.json` (row counts, my rows, date kinds, off-day moves, formula columns detected, no unmapped statuses except the documented pending ones).
+- **Fixture tests**: run the whole read path (XlsxFixtureSource + config + planner) over each example tracker and assert the `expected` block in `fixtures/trackers.config.json` (row counts, my rows, date kinds, off-day moves, formula columns detected, no unmapped statuses except the documented pending ones). Unit also covers: every `endDateCases` case in `fixtures/date-parser.cases.json`; the same result as before for every `cases` entry when no End date is mapped; End date changes in `planPull` (moved, same due date, cleared into the past, invalid, waiting for close); the standard setup rules (N68 to N70). Fixture tests also cover `Knit_Standard_Tracker_v1_example.xlsx`, an example in the standard layout, check that the standard setup produces exactly its registry entry, and check that every mapped header (End date included) exists. E2E also connects that example with Use the standard setup.
 - **Integration (local Supabase via CLI)**: `set_task_status` permission and lock rules; `close_day` creates spillovers, skips holidays and off Saturdays, is idempotent when run twice; catch-up over a 3-day gap; `admin_correct_task_day` closes the chain; `apply_pull_plan` returns retry on stale `state_version`; RLS: a member cannot read another member's tasks.
 - **Race tests (MemorySheetSource)**: row inserted between ID write and verify; rows sorted between read and push; duplicate Knit IDs; push after a column move.
 - **E2E (Playwright)**: log in, see Today, change a status, see Syncing clear; pull forward from Calendar; locked past day is read-only; empty states render. They run against local Supabase in local sheet mode (N16), seeded by `pnpm seed:local`; CI fixes `knit_today()` for the Data API with a role setting on `authenticator` (superuser only, never in production), connects the example trackers on Mon 28 Sep 2026, moves to Wed 30 Sep and runs the close, then takes screenshots at 1280 px and 390 px.
@@ -994,3 +1058,4 @@ Phases, milestones and acceptance criteria are in `docs/SOW.md`. Summary: Phase 
 | Q6 | When the admin corrects the final task-day of a finished (dated) task to Yet to Start, In Progress or Blocked, should the task reopen, for example with a task-day on the next working day? Until decided, such corrections are refused (N15) | M8 corrections screen | Resolved 1 Oct 2026: yes. The correction reopens the task like a spillover of the day it ended: on today when today is a working day, else on the next working day (a task-day already on today or later reopens in place). See N15 and 6.10. When the sheet reopens a finished task, Knit still raises a conflict and the admin reopens it with a correction (10.3) |
 | Q7 | A task already overdue can have its open task-day on a later day: a backlog task before go-live, or brought on an off day after go-live (N61), a reopen on the next working day (Q6), a holiday move (N37). Today then lists it under Pulled forward, and when it is done before that day its row says "Done early" while its Knit Note says "Done on {date} · after {n} spill". Should Pulled forward and "Done early" go by the task's due date instead of the task-day's day? | Before Phase 2 go-live (13 Oct 2026) | Open |
 | Q8 | While a tracker's go-live is still ahead, a sheet edit can move a task's planned date before go-live; Knit then places its task-day before go-live (6.6), where the close records a miss. Should such a task become history only, or keep its task-day on the go-live day? | Before Phase 2 go-live (13 Oct 2026) | Open |
+| Q9 | A window whose last day is an off day can fall due before its first day under previous_working_day (Date Sat 24 Oct, End date Sun 25 Oct is due Fri 23 Oct): it never shows under Ongoing and is due before it starts. Text windows behave the same today. Keep this, or make such a window due on its first working day on or after its start? | Before Phase 2 go-live (13 Oct 2026) | Open |

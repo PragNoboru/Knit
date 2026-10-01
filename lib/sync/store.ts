@@ -74,6 +74,12 @@ export interface SyncStore {
     trackerId: string,
   ): Promise<{ stateVersion: number; tasks: PlanTask[] }>;
   knitIdsElsewhere(trackerId: string, ids: string[]): Promise<string[]>;
+  /** N59: the new Knit IDs about to be written on rows that came back (before the write). */
+  recordReturnedRows(trackerId: string, knitIds: string[]): Promise<void>;
+  /** N59, N17: queues the note refresh of every recorded returning row now saved as a task. */
+  refreshReturnedRows(trackerId: string): Promise<number>;
+  /** N59: which of these tasks are removed at source now (the push asks after its read). */
+  removedTaskIds(taskIds: string[]): Promise<string[]>;
   /** PRD 7.4: the tab's current name, picked up by the pull (tabs are found by gid). */
   recordTabName(trackerId: string, tabName: string): Promise<void>;
   pullRequests(ids?: string[]): Promise<Record<string, PullRequest>>;
@@ -191,6 +197,22 @@ export function createSyncStore(rpc: Rpc): SyncStore {
             p_tracker_id: trackerId,
             p_ids: ids,
           })) as string[]),
+    recordReturnedRows: async (trackerId, knitIds) => {
+      if (knitIds.length === 0) return;
+      await rpc("record_returned_rows", {
+        p_tracker_id: trackerId,
+        p_knit_ids: knitIds,
+      });
+    },
+    refreshReturnedRows: async (trackerId) =>
+      Number(await rpc("refresh_returned_rows", { p_tracker_id: trackerId })),
+    removedTaskIds: async (taskIds) =>
+      taskIds.length === 0
+        ? []
+        : (
+            ((await rpc("removed_task_ids", { p_task_ids: taskIds })) as
+              string[] | null) ?? []
+          ).map(String),
     recordTabName: async (trackerId, tabName) => {
       await rpc("record_tab_name", {
         p_tracker_id: trackerId,

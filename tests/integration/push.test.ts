@@ -305,6 +305,35 @@ describe("push (PRD 10.4)", () => {
       ]);
     });
 
+    it("a task a pull marks removed after the claim is not written, though its row is still there (N59)", async () => {
+      const g01 = await taskId(db(), "G01");
+      await setStatus(g01, "done");
+      const store = storeFor(db());
+      const racing = {
+        ...store,
+        // A pull beside this push (its own lease) marks the task removed once it is claimed;
+        // the row is back in the sheet before the push reads it.
+        async pushClaim(limit: number, task: string | null) {
+          const claimed = await store.pushClaim(limit, task);
+          await db().query(
+            "update tasks set removed_at_source = now() where id = $1",
+            [g01],
+          );
+          return claimed;
+        },
+      };
+      const before = cells();
+      expect(await pushDue({ store: racing, source })).toMatchObject({
+        claimed: 1,
+        failed: 1,
+        done: 0,
+      });
+      expect(cells()).toBe(before);
+      expect(await outboxOf(g01)).toEqual([
+        { state: "failed", last_error: "row_not_found" },
+      ]);
+    });
+
     it("push_claim says whether each task was removed at source, and a status write-back still beats a note-only one (N17)", async () => {
       const g01 = await taskId(db(), "G01");
       const g02 = await taskId(db(), "G02");

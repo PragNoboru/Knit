@@ -204,6 +204,70 @@ describe("ensureKnitIds: a row that comes back (N30, N59)", () => {
     ]);
   });
 
+  it("records the returning row's new ID before writing it, and never a pasted copy's (N59, invariant 8)", async () => {
+    const source = sheet(
+      [
+        line("G01", "Live task", LIVE),
+        line("G02", "Came back", RETIRED),
+        line("G03", "Came back", RETIRED),
+        line("G04", "Brand new", ""),
+      ],
+      Recording,
+    );
+    const recorded: { ids: string[]; writesSoFar: number }[] = [];
+    const result = await ensureKnitIds(
+      source,
+      ref,
+      config,
+      await read(source)(),
+      noneElsewhere,
+      read(source),
+      new Set([RETIRED]),
+      async (ids) => {
+        recorded.push({ ids, writesSoFar: writes.length });
+      },
+    );
+    expect(result.written).toBe(3);
+    expect(result.returned).toHaveLength(1);
+    expect(recorded).toEqual([{ ids: result.returned, writesSoFar: 0 }]);
+  });
+
+  it("records nothing when no row comes back", async () => {
+    const source = sheet([line("G04", "Brand new", "")]);
+    const calls: string[][] = [];
+    const result = await ensureKnitIds(
+      source,
+      ref,
+      config,
+      await read(source)(),
+      noneElsewhere,
+      read(source),
+      new Set([RETIRED]),
+      async (ids) => {
+        calls.push(ids);
+      },
+    );
+    expect(result.written).toBe(1);
+    expect(calls).toEqual([]);
+  });
+
+  it("a failed record writes nothing into the sheet", async () => {
+    const source = sheet([line("G02", "Came back", RETIRED)], Recording);
+    await expect(
+      ensureKnitIds(
+        source,
+        ref,
+        config,
+        await read(source)(),
+        noneElsewhere,
+        read(source),
+        new Set([RETIRED]),
+        () => Promise.reject(new Error("db down")),
+      ),
+    ).rejects.toThrow("db down");
+    expect(writes).toEqual([]);
+  });
+
   it("a new ID that lands on another row: that row's own ID is put back, the retired ID is never written (N20)", async () => {
     class InsertBeforeWrite extends Recording {
       armed = true;

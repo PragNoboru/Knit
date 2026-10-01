@@ -17,8 +17,8 @@ import {
  *   * The same Knit ID on two rows (or one that belongs to another tracker): the lower row is
  *     treated as new and gets a new ID; attention duplicate_knit_id.
  *   * A Knit ID of a task removed at source (a deleted row put back, N30, N59): the upper such
- *     row is treated as a row without an ID, with no attention item, and is listed in
- *     `returned` once its new ID is confirmed. A lower row with the same ID is a pasted copy
+ *     row is treated as a row without an ID, with no attention item. Its new ID is passed to
+ *     `recordReturning` before it is written, and listed in `returned` once confirmed. A lower row with the same ID is a pasted copy
  *     (duplicate_knit_id, as above). The removed task's ID never matches a row again.
  *   * Rows without one get a new UUID written into the sheet first. Just before writing, the
  *     rows are read again and an ID is written only where the same row still has the same
@@ -179,6 +179,12 @@ export async function ensureKnitIds(
   reread: () => Promise<SheetRow[]>,
   /** The lower-cased Knit IDs of this tracker's tasks removed at source (N30, N59). */
   retired: ReadonlySet<string> = new Set(),
+  /**
+   * N59, invariant 8: called with the new Knit IDs about to be written on rows that came back,
+   * before they are written, so their note refresh is not lost when the run stops after the
+   * write. An ID that is then not confirmed never becomes a task.
+   */
+  recordReturning: (ids: string[]) => Promise<void> = async () => {},
 ): Promise<IdentityResult> {
   const attention: IdentityAttention[] = [];
   const elsewhere = new Set(
@@ -248,6 +254,10 @@ export async function ensureKnitIds(
       row: row.rowNumber,
       title: titleOf(row, config),
     });
+  const returningNew = [...assigned]
+    .filter(([, { row }]) => returning.has(row))
+    .map(([id]) => id);
+  if (returningNew.length > 0) await recordReturning(returningNew);
   await source.writeCells(
     ref,
     config.headerRow,

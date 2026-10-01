@@ -198,6 +198,9 @@ export async function pullTracker(
         (ids) => store.knitIdsElsewhere(tracker.id, ids),
         readRows,
         retired,
+        // N59, invariant 8: recorded before the write, so the note refresh is queued by
+        // whichever pull saves the new task, even if this run stops first.
+        (ids) => store.recordReturnedRows(tracker.id, ids),
       );
       idsWritten += identity.written;
       idsCleared += identity.cleared;
@@ -267,21 +270,20 @@ export async function pullTracker(
       if (applied.result === "applied") {
         // The requests read before this pull loaded its inputs are served; a later one stays.
         if (request) await store.markPullServed(tracker.id, request.requested);
-        if (returned.size > 0) {
-          // N59, N17: the Knit Note of a row that came back still describes the removed task.
-          // Best effort: the plan is applied, so a failure here never fails the run; the note
-          // is then rewritten by the new task's next write-back.
-          try {
-            await store.enqueueNoteRefresh([...returned]);
-          } catch (error) {
-            logEvent("pull.note_refresh_failed", {
-              job: "pull",
-              tracker: tracker.id,
-              run: runId,
-              count: returned.size,
-              error: errorSummary(error),
-            });
-          }
+        // N59, N17: the Knit Note of a row that came back still describes the removed task.
+        // Every returning row recorded so far whose new task is now saved (by this pull or, when
+        // its date was unreadable or an earlier run stopped, a later one) gets its note
+        // refresh. Best effort: the plan is applied, so a failure never fails the run; the
+        // recorded rows wait for the next applied pull.
+        try {
+          await store.refreshReturnedRows(tracker.id);
+        } catch (error) {
+          logEvent("pull.note_refresh_failed", {
+            job: "pull",
+            tracker: tracker.id,
+            run: runId,
+            error: errorSummary(error),
+          });
         }
         const stats = {
           ...plan.stats,
@@ -309,7 +311,13 @@ export async function pullTracker(
     await store.finishRun(
       runId,
       false,
-      { outcome: "stale", rowsReturned: returned.size },
+      {
+        outcome: "stale",
+        idsWritten,
+        idsCleared,
+        idsRestored,
+        rowsReturned: returned.size,
+      },
       "plan went stale three times",
     );
     logEvent("pull.stale", { job: "pull", tracker: tracker.id, run: runId });

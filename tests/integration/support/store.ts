@@ -19,6 +19,11 @@ const SIGNATURES: Record<
     returns: "text[]",
   },
   record_tab_name: { args: { p_tracker_id: "uuid", p_tab_name: "text" } },
+  record_returned_rows: {
+    args: { p_tracker_id: "uuid", p_knit_ids: "uuid[]" },
+  },
+  refresh_returned_rows: { args: { p_tracker_id: "uuid" } },
+  removed_task_ids: { args: { p_task_ids: "uuid[]" }, returns: "text[]" },
   apply_pull_plan: {
     args: {
       p_tracker_id: "uuid",

@@ -340,21 +340,82 @@ describe("the wizard's checks", () => {
       );
   });
 
-  it("defaults go-live to today until the admin saves a date at step 7 (11 step 7)", () => {
-    const tracker = {
+  describe("go-live defaults to the next working day until a date is saved at step 7 (N42)", () => {
+    const draft = {
       state: "draft",
       goLiveDate: "2026-09-28",
       draft: {} as DraftConfig,
     };
-    expect(goLiveDefault(tracker, "2026-09-30")).toBe("2026-09-30");
-    expect(
-      goLiveDefault(
-        { ...tracker, draft: { goLiveChosen: true } },
-        "2026-09-30",
-      ),
-    ).toBe("2026-09-28");
-    expect(goLiveDefault({ ...tracker, state: "active" }, "2026-09-30")).toBe(
-      "2026-09-28",
-    );
+
+    it.each([
+      ["Wed 30 Sep gives Thu 1 Oct", "2026-09-30", "2026-10-01"],
+      // 2 Oct is Gandhi Jayanti; 3 Oct is a 1st Saturday, a working day (6.2).
+      [
+        "Thu 1 Oct skips a holiday to a 1st Saturday",
+        "2026-10-01",
+        "2026-10-03",
+      ],
+      [
+        "Fri 9 Oct skips a 2nd Saturday and a Sunday",
+        "2026-10-09",
+        "2026-10-12",
+      ],
+      ["Sun 4 Oct, an off day, gives Mon 5 Oct", "2026-10-04", "2026-10-05"],
+      ["Mon 19 Oct skips Dussehra on 20 Oct", "2026-10-19", "2026-10-21"],
+      ["Fri 30 Oct skips a 5th Saturday (N2)", "2026-10-30", "2026-11-02"],
+    ])("%s", (_name, today, expected) => {
+      expect(goLiveDefault(draft, today, calendar)).toBe(expected);
+    });
+
+    it("keeps a saved date and a live tracker's date (N19 b)", () => {
+      const saved = { ...draft, draft: { goLiveChosen: true } };
+      for (const today of ["2026-09-25", "2026-09-30", "2026-10-10"]) {
+        expect(goLiveDefault(saved, today, calendar)).toBe("2026-09-28");
+        expect(
+          goLiveDefault({ ...draft, state: "active" }, today, calendar),
+        ).toBe("2026-09-28");
+      }
+    });
+
+    it("has no default when the calendar does not reach the next working day", () => {
+      const short = calendarFromDays(
+        calendarDaysFromRules(holidays, "2026-09-01", "2026-09-30"),
+      );
+      expect(goLiveDefault(draft, "2026-09-30", short)).toBeNull();
+      expect(goLiveDefault(draft, "2026-10-05", short)).toBeNull();
+      expect(
+        goLiveDefault(
+          { ...draft, draft: { goLiveChosen: true } },
+          "2026-09-30",
+          short,
+        ),
+      ).toBe("2026-09-28");
+    });
+
+    it("counts today's rows as history only in the preview (11 step 8)", async () => {
+      const entry = byName("Filing Buddy · Meta Ads");
+      const { config, ref } = await open(entry);
+      const [row] = (await source.readRows(ref, config.headerRow))
+        .filter((r) => !isEmptyRow(r, config))
+        .map((r) =>
+          normaliseRow(r, {
+            config,
+            calendar,
+            aliases,
+            trackerOwnerId: null,
+            today: TODAY,
+            knitIdHeader: "Knit ID",
+          }),
+        )
+        .filter((r) => r.date.kind === "single");
+      const goLive = goLiveDefault(draft, "2026-09-30", calendar)!;
+      expect(goLive).toBe("2026-10-01");
+      const rows = [
+        { ...row!, dueDate: "2026-09-30" },
+        { ...row!, dueDate: "2026-10-01" },
+      ];
+      expect(previewStats(rows, goLive).historyOnly).toBe(1);
+      expect(previewStats(rows.slice(1), goLive).historyOnly).toBe(0);
+    });
   });
 });

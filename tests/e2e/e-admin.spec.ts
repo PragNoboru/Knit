@@ -104,8 +104,12 @@ test("the wizard connects a new sheet end to end", async ({ page }, info) => {
   await expect(page).toHaveURL(/\/setup\/owners$/);
   await page.getByRole("button", { name: "Save and continue" }).first().click();
 
-  // Step 7: name, colour, go-live.
+  // Step 7: name, colour, go-live. Go-live defaults to the next working day (N42). The flows run
+  // on Wed 30 Sep 2026 (the ci.yml step "Move to Wed 30 Sep 2026"), so the default is Thu 1 Oct.
   await expect(page).toHaveURL(/\/setup\/details$/);
+  await expect(page.getByLabel("Go-live date", { exact: true })).toHaveValue(
+    "2026-10-01",
+  );
   await page
     .getByRole("textbox", { name: "Name", exact: true })
     .fill("Noboru · CA Campaign");

@@ -11,6 +11,7 @@ import { isEmptyRow, normaliseRow } from "@/lib/domain/rows";
 import {
   DraftConfig,
   finalConfig,
+  goLiveDefault,
   statusChoices,
   unmappedChoices,
 } from "@/lib/domain/wizard";
@@ -201,6 +202,8 @@ export async function loadNormalisedRows(tracker: AdminTracker) {
   const aliases = aliasMap(context.aliases);
   return {
     today,
+    /** 11 step 8: the go-live activation would use (N42); null when step 7 must choose one. */
+    goLive: goLiveDefault(tracker, today, calendar),
     config: config.data,
     rows: rows
       .filter((row) => !isEmptyRow(row, config.data))

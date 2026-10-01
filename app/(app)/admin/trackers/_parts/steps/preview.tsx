@@ -4,10 +4,11 @@ import { Section, Table } from "@/components/admin/fields";
 import { StatusBadge } from "@/components/status-badge";
 import { buttonVariants } from "@/components/ui/button";
 import { loadNormalisedRows, type AdminTracker } from "@/lib/admin/data";
-import { previewStats } from "@/lib/domain/wizard";
+import { GO_LIVE_NEEDS_A_DATE, previewStats } from "@/lib/domain/wizard";
 import { formatDay } from "@/lib/time";
 
 // PRD 11 step 8: the first 20 tasks as Today would show them, and the counts. Nothing is written.
+// It uses the go-live activation would use: the saved date, else the next working day (N42).
 export async function PreviewStep({ tracker }: { tracker: AdminTracker }) {
   const normalised = await loadNormalisedRows(tracker);
   if (!normalised)
@@ -16,11 +17,13 @@ export async function PreviewStep({ tracker }: { tracker: AdminTracker }) {
         Finish the columns and statuses first; the preview needs them.
       </p>
     );
-  const stats = previewStats(normalised.rows, tracker.goLiveDate);
+  const { goLive } = normalised;
+  if (goLive === null) return <p className="text-sm">{GO_LIVE_NEEDS_A_DATE}</p>;
+  const stats = previewStats(normalised.rows, goLive);
   const upcoming = normalised.rows
     .filter(
       (row) =>
-        (row.dueDate !== null && row.dueDate >= tracker.goLiveDate) ||
+        (row.dueDate !== null && row.dueDate >= goLive) ||
         row.date.kind === "open",
     )
     .sort((a, b) => ((a.dueDate ?? "9999") < (b.dueDate ?? "9999") ? -1 : 1))

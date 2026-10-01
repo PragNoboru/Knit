@@ -134,12 +134,16 @@ describe("matchStandardTemplate (N68)", () => {
     for (const [file, title] of [
       ["Filing_Buddy_Google_Ads_Tracker", "Copy of Google"],
       ["Filing_Buddy_Meta_Ads_Tracker", "Copy of Meta"],
-      ["Noboru_CA_Campaign_test_example", "Sheet1"],
+      ["Noboru_CA_Campaign_test_example", "Tasks"],
       ["Sapiens_Example_Tracker", "Calendar"],
     ] as const) {
       const tabs = await source.listTabs(file);
-      const found = tabs.find((t) => t.title === title) ?? tabs[0]!;
-      const { structure: s } = await tab(file, found.title);
+      // The tab trackers.config.json connects; a wrong name fails here, never falls back.
+      expect(
+        tabs.map((t) => t.title),
+        file,
+      ).toContain(title);
+      const { structure: s } = await tab(file, title);
       expect(matchStandardTemplate(s), file).toBe(null);
     }
   });
@@ -192,7 +196,9 @@ describe("standardSetupDraft (11.1, N69)", () => {
     );
   });
 
-  it("keeps goLiveChosen and clears cancel reasons; at most 8 detail columns", () => {
+  // The merge into a saved draft (goLiveChosen kept) is tested on applyStandardSetup in
+  // admin-actions.test.ts.
+  it("leaves goLiveChosen out, clears cancel reasons and keeps at most 8 detail columns", () => {
     const match = matched(structure(V1));
     const { patch } = standardSetupDraft(
       match,
@@ -203,13 +209,6 @@ describe("standardSetupDraft (11.1, N69)", () => {
     expect(patch).not.toHaveProperty("goLiveChosen");
     expect(patch.cancelReasons).toEqual({});
     expect(patch.detailColumns!.length).toBeLessThanOrEqual(8);
-    const draft = {
-      goLiveChosen: true,
-      cancelReasons: { skipped: "Dropped" },
-      ...patch,
-    };
-    expect(draft.goLiveChosen).toBe(true);
-    expect(draft.cancelReasons).toEqual({});
   });
 
   it("opens Map statuses when the column holds a word outside the five, and names it", () => {

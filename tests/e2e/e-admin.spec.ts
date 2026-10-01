@@ -135,9 +135,8 @@ test("the wizard connects a new sheet end to end", async ({ page }, info) => {
   );
   const trackerId = /\/admin\/trackers\/([0-9a-f-]{36})/.exec(page.url())![1]!;
   if (page.url().endsWith("/backlog")) {
-    // Go-live is tomorrow (Thu 1 Oct), so Bring to today, the default action, would put the
-    // row on a day that closes as not done before go-live. docs/RUNBOOK.md section 4 step 5
-    // says not to use it before the go-live day; Mark done is safe on any day.
+    // Go-live is tomorrow (Thu 1 Oct), so Bring to today would put the row on the go-live day
+    // (N61). Mark done marks it done today, on any day.
     const first = page.locator('input[name="taskId"]').first();
     await first.check();
     await page

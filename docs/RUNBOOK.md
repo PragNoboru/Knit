@@ -146,8 +146,8 @@ Knit never guesses: an unmapped status counts as Yet to Start (never Done), an u
    - Go-live defaults to the next working day (N42): rows due before it, today's included, are history only (their Knit Note says Before Knit go-live), and open ones are listed in the backlog review. Pick another date at step 7 if needed.
 4. Activation adds a hidden **Knit ID** column (protected with a warning) and a visible **Knit Note** column at the right of the tab, writes an ID on every row and pulls the tracker. Do not edit, sort into, or delete the Knit ID column.
 5. **Backlog review**: when old rows are still open, activation opens it straight away. Bring to today, Mark done, or Cancel with a reason. Rows left alone stay history only.
-   - Do not use Bring to today before the go-live day. It puts the task on the day you use it, and a day before go-live then closes as not done, which shows a miss that never happened and a "Spilled 2x" note. With the default go-live, the next working day (N42), activation always comes before go-live, so this is the usual case.
-   - Mark done and Cancel are safe on any day. Leave the rows to bring forward alone, and on the go-live day open the review again from the tracker page (**open rows before go-live**).
+   - Bring to today never puts a task before go-live (N61). While go-live is still ahead (with the default go-live, the next working day, it always is on activation day), it puts the task on the go-live day, and the review says so under Action. From the go-live day on it puts the task on today. Either way the task counts as spilled once (Spilled 1x), and the days before go-live close with no miss.
+   - Mark done and Cancel work the same on any day. You can come back later from the tracker page (**open rows before go-live**).
 
 To change a live tracker's mapping later: Admin > Trackers > the tracker > **Edit mapping**. Saving checks the tab and pulls again; history is never rewritten. Choosing another status column takes you to the statuses step: Knit keeps using the old column until the new column's words are mapped there.
 
@@ -167,7 +167,7 @@ To connect another tab of a spreadsheet that already has a tracker: **Set up ano
    ```
 
    The reset keeps the Vault secrets but drops the jobs. Then run `cron.sql` again (2.4, it is safe to run again) and bootstrap the admin again (2.5).
-5. Connect each real tracker (section 4) and check that step 7 shows the agreed go-live date (connected the evening before, it does). Review each backlog on the go-live day from the tracker page.
+5. Connect each real tracker (section 4) and check that step 7 shows the agreed go-live date (connected the evening before, it does). Review each backlog right after activation or later from the tracker page: Bring to today puts tasks on the go-live day while it is still ahead (N61), so nothing lands on a day before go-live.
 
 ## 6. Rotate secrets
 

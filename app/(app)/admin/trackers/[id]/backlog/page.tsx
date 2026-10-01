@@ -12,14 +12,16 @@ import {
 import { StatusBadge } from "@/components/status-badge";
 import { TrackerChip } from "@/components/tracker-chip";
 import { backlogAction } from "@/lib/actions/admin";
-import { loadBacklog, loadTracker } from "@/lib/admin/data";
+import { loadBacklog, loadSheetDeps, loadTracker } from "@/lib/admin/data";
+import { bringToTodayHint } from "@/lib/domain/backlog";
 import { REASON_MAX_LENGTH } from "@/lib/domain/status";
 import { formatDay } from "@/lib/time";
 
 export const metadata: Metadata = { title: "Backlog review · Knit" };
 
 // PRD 6.11, 11 step 10: open rows planned before go-live. Bring to today, Mark done, or Cancel
-// (reason required); rows left alone stay history only.
+// (reason required); rows left alone stay history only. While go-live is still ahead, Bring to
+// today puts tasks on the go-live date (N61), and the page says so.
 export default async function BacklogPage({
   params,
 }: {
@@ -29,6 +31,13 @@ export default async function BacklogPage({
   const tracker = await loadTracker(id);
   if (!tracker || tracker.state === "draft") notFound();
   const rows = await loadBacklog(id);
+  const hint =
+    rows.length === 0
+      ? null
+      : bringToTodayHint(
+          tracker.goLiveDate,
+          await (await loadSheetDeps()).store.today(),
+        );
 
   return (
     <div className="flex flex-col gap-5">
@@ -74,7 +83,7 @@ export default async function BacklogPage({
               ))}
             </ul>
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Action" htmlFor="action">
+              <Field label="Action" htmlFor="action" hint={hint}>
                 <NativeSelect
                   id="action"
                   name="action"

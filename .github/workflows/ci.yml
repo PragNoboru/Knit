@@ -156,6 +156,11 @@ jobs:
         run: |
           echo "::error title=e2e server errors::$(grep -iE 'error|⨯|digest' e2e.log | grep -v '^ *at ' | head -c 3500 | tr '\n' ' ')"
           echo "::error title=e2e last lines::$(tail -c 3000 e2e.log | tr '\n' ' ')"
+          echo "::error title=e2e server error context::$(grep -B4 -A10 'RpcError' e2e.log | head -c 3500 | tr '\n' ' ')"
+          # The page as it was when each test failed (artifacts need a sign-in; annotations do not).
+          for f in $(find test-results -name error-context.md 2>/dev/null | head -3); do
+            echo "::error title=e2e page at failure::$(head -c 3500 "$f" | tr '\n' ' ')"
+          done
 
       # M7: screenshots at 1280 px and 390 px, and the report of any failure.
       - name: Keep the screenshots and the report

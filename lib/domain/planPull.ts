@@ -458,7 +458,9 @@ class Planner {
         !openEnded &&
         !task.historyOnly;
       if (reopening) {
-        // The sheet reopened a task Knit has closed: Knit cannot place it without a rule (Q6).
+        // The sheet reopened a task Knit has closed. Only an admin correction, with its reason,
+        // reopens a closed task (6.10, 10.3, invariant 7); the conflict tells the admin, and
+        // the correction resolves it.
         this.attention("conflict", task.id, task.id, {
           reason: "reopened_in_source",
           knit: task.status,

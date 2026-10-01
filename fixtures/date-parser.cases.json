@@ -551,6 +551,50 @@
         "start": "2026-10-13",
         "end": "2026-10-16"
       }
+    },
+    {
+      "date": {
+        "cell": "text",
+        "input": "Fri 26 Mar"
+      },
+      "end": {
+        "cell": "text",
+        "input": "2 Apr"
+      },
+      "expect": {
+        "kind": "window",
+        "start": "2027-03-26",
+        "end": "2027-04-02"
+      }
+    },
+    {
+      "date": {
+        "cell": "text",
+        "input": "Mon 28 Dec"
+      },
+      "end": {
+        "cell": "text",
+        "input": "3 Jan"
+      },
+      "expect": {
+        "kind": "window",
+        "start": "2026-12-28",
+        "end": "2027-01-03"
+      }
+    },
+    {
+      "date": {
+        "cell": "text",
+        "input": "Sat 28 Sep"
+      },
+      "end": {
+        "cell": "date",
+        "input": "2026-10-02"
+      },
+      "expect": {
+        "kind": "invalid",
+        "reason": "weekday_mismatch"
+      }
     }
   ]
 }

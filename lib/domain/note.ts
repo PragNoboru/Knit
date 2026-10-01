@@ -9,6 +9,7 @@ import type { KnitStatus } from "./config";
  * | State                         | Note                                                  |
  * | Open, never spilled           | empty, or "In progress" / "Blocked: {reason}"         |
  * | Open, spilled                 | "Spilled {n}x · now due {date}" (+ status as above)   |
+ *   (n: the spill index of the open task-day, N62)
  * | Done on time                  | "Done on {date}"                                      |
  * | Done after spills             | "Done on {date} · after {n} spills"                   |
  * | Done early                    | "Done early on {date} · planned {due}"                |
@@ -34,6 +35,13 @@ export interface NoteTaskDay {
 }
 
 const ELLIPSIS = String.fromCharCode(0x2026);
+
+/** Task-day statuses that end a task-day: never the open task-day of an open task. */
+const FINISHED_DAY: ReadonlySet<KnitStatus> = new Set([
+  "done",
+  "cancelled",
+  "not_done",
+]);
 
 /** Keeps the note within 80 characters by shortening the reason, which is the free text. */
 function fit(prefix: string, reason: string, suffix = ""): string {
@@ -68,8 +76,6 @@ export function renderKnitNote(
       : "Cancelled";
   }
 
-  const spills = taskDays.reduce((max, d) => Math.max(max, d.spillIndex), 0);
-
   if (task.status === "done") {
     const doneOn = task.completedOn ?? today;
     if (task.dueDate && doneOn < task.dueDate) {
@@ -95,14 +101,21 @@ export function renderKnitNote(
   }
 
   const status = openStatusText(task);
+  // The open task-day: unlocked, not finished. A task-day a correction cancelled is finished
+  // even while unlocked (6.10), so it is never the one the task is now due on.
   const openDay = taskDays
-    .filter((d) => !d.locked)
+    .filter((d) => !d.locked && !FINISHED_DAY.has(d.status))
     .reduce<NoteTaskDay | null>(
       (latest, d) => (latest === null || d.day > latest.day ? d : latest),
       null,
     );
 
-  if (spills > 0 && openDay) {
+  // N62 (amends N38): n is the spill index of the open task-day, never the highest of all the
+  // task's task-days, so task-days a correction cancelled never count. After a Done correction
+  // is undone (Q6), the reopened task-day carries the corrected one's spill index plus one,
+  // while the later task-days that correction cancelled keep their higher spill indexes.
+  const spills = openDay?.spillIndex ?? 0;
+  if (openDay && spills > 0) {
     const head = `Spilled ${spills}x · now due ${formatDay(openDay.day)}`;
     if (!status) return head;
     return fit(`${head} · ${status.prefix}`, status.reason);

@@ -376,4 +376,75 @@ describe("renderKnitNote (PRD 6.9): every row of the table", () => {
       ),
     ).toBe("Done on Thu 1 Oct · after 1 spill");
   });
+
+  describe("open, spilled: n is the open task-day's spill index (N62, amends N38)", () => {
+    // G21 missed Wed 30 Sep, Thu 1 Oct and Sat 3 Oct and is open on Mon 5 Oct (spill 3). On
+    // Mon 5 Oct the admin corrects Thu 1 Oct to Done by mistake: Sat 3 Oct and Mon 5 Oct are
+    // cancelled by the correction (6.10), their spill indexes kept.
+    const mistakenDone: NoteTaskDay[] = [
+      day("2026-09-30", 0, true),
+      day("2026-10-01", 1, true, "done"),
+      day("2026-10-03", 2, true, "cancelled"),
+      day("2026-10-05", 3, true, "cancelled"),
+    ];
+
+    it("Q6 undone the next day: the reopened task counts only its new task-day's spills", () => {
+      // Tue 6 Oct: the admin corrects Thu 1 Oct back to In Progress. Its last task-day, Mon 5
+      // Oct, is before today, so a task-day is added on today with the corrected task-day's
+      // spill index plus one (2); the cancelled task-days keep 2 and 3 and never count.
+      const undone: NoteTaskDay[] = [
+        day("2026-09-30", 0, true),
+        day("2026-10-01", 1, true, "in_progress"),
+        day("2026-10-03", 2, true, "cancelled"),
+        day("2026-10-05", 3, true, "cancelled"),
+        day("2026-10-06", 2, false, "in_progress"),
+      ];
+      expect(
+        renderKnitNote(task({ status: "in_progress" }), undone, "2026-10-06"),
+      ).toBe("Spilled 2x · now due Tue 6 Oct · In progress");
+      // While the mistaken Done stood, the Done note already ignored them (N38).
+      expect(
+        renderKnitNote(
+          task({ status: "done", completedOn: "2026-10-01" }),
+          mistakenDone,
+          "2026-10-05",
+        ),
+      ).toBe("Done on Thu 1 Oct · after 1 spill");
+    });
+
+    it("Q6 undone the same day: the task-day reopened in place counts the corrected one's spills plus one", () => {
+      // Mon 5 Oct, still the same day: Mon 5 Oct is today, so it reopens in place with the
+      // corrected task-day's spill index plus one (2), not the 3 it had before.
+      const undone: NoteTaskDay[] = [
+        day("2026-09-30", 0, true),
+        day("2026-10-01", 1, true, "yet_to_start"),
+        day("2026-10-03", 2, true, "cancelled"),
+        day("2026-10-05", 2, false, "yet_to_start"),
+      ];
+      expect(renderKnitNote(task({}), undone, TODAY)).toBe(
+        "Spilled 2x · now due Mon 5 Oct",
+      );
+    });
+
+    it("never takes a task-day a correction cancelled as the open one, locked or not", () => {
+      const days: NoteTaskDay[] = [
+        day("2026-09-30", 0, true),
+        day("2026-10-01", 1, false, "in_progress"),
+        day("2026-10-03", 4, false, "cancelled"),
+      ];
+      expect(
+        renderKnitNote(task({ status: "in_progress" }), days, "2026-10-01"),
+      ).toBe("Spilled 1x · now due Thu 1 Oct · In progress");
+    });
+
+    it("an open task with no open task-day shows only its status", () => {
+      expect(
+        renderKnitNote(
+          task({ status: "blocked", statusReason: "Agency" }),
+          [day("2026-09-30", 0, true), day("2026-10-01", 1, true)],
+          TODAY,
+        ),
+      ).toBe("Blocked: Agency");
+    });
+  });
 });

@@ -17,7 +17,11 @@ import {
   unmappedChoices,
 } from "@/lib/domain/wizard";
 import { jobDeps } from "@/lib/jobs/cron";
-import { KNIT_ID_HEADER, type TabRef } from "@/lib/sheets/types";
+import {
+  KNIT_ID_HEADER,
+  type TabRef,
+  type TabStructure,
+} from "@/lib/sheets/types";
 import { callRpc, getSupabase } from "@/lib/supabase/server";
 import type { LocalDate } from "@/lib/time";
 
@@ -167,6 +171,28 @@ export const loadTopRows = cache(async (ref: TabRef) => {
   return source.readTopRows(ref, 10);
 });
 
+/** The wizard's view of a header row: blank headers and Knit's own columns left out. */
+function wizardStructure(structure: TabStructure): TabStructure {
+  return {
+    ...structure,
+    headers: structure.headers.filter(
+      (h) =>
+        h.header.trim() !== "" &&
+        h.normalised !== KNIT_ID_HEADER.toLowerCase() &&
+        h.normalised !== "knit note",
+    ),
+  };
+}
+
+/**
+ * 11 step 3 (N68): headers, formula columns and dropdowns of a header row, without the data
+ * rows. Enough to decide whether a standard template matches row 1.
+ */
+export const loadStructure = cache(async (ref: TabRef, headerRow: number) => {
+  const { source } = await loadSheetDeps();
+  return wizardStructure(await source.readStructure(ref, headerRow));
+});
+
 /** 11 step 4: headers, formula columns and dropdowns, and the data rows under them. */
 export const loadTabData = cache(async (ref: TabRef, headerRow: number) => {
   const { source } = await loadSheetDeps();
@@ -174,18 +200,7 @@ export const loadTabData = cache(async (ref: TabRef, headerRow: number) => {
     source.readStructure(ref, headerRow),
     source.readRows(ref, headerRow),
   ]);
-  return {
-    structure: {
-      ...structure,
-      headers: structure.headers.filter(
-        (h) =>
-          h.header.trim() !== "" &&
-          h.normalised !== KNIT_ID_HEADER.toLowerCase() &&
-          h.normalised !== "knit note",
-      ),
-    },
-    rows,
-  };
+  return { structure: wizardStructure(structure), rows };
 });
 
 /**

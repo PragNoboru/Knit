@@ -3,7 +3,7 @@ import { Section } from "@/components/admin/fields";
 import { applyStandardSetup, saveHeaderRow } from "@/lib/actions/admin";
 import {
   loadSheetDeps,
-  loadTabData,
+  loadStructure,
   loadTopRows,
   type AdminTracker,
 } from "@/lib/admin/data";
@@ -14,18 +14,25 @@ import {
   standardHeading,
 } from "@/lib/domain/standard-template";
 import { suggestHeaderRow } from "@/lib/domain/wizard";
+import { errorSummary, logEvent } from "@/lib/sync/log";
 
 // PRD 11 step 3: the first 10 rows; the first mostly-text row is suggested; the admin confirms.
 // On a draft whose row 1 holds a standard template's headers, Use the standard setup is offered
 // first (11.1, N68), in its own form; when a write target holds formulas only the reason shows.
+// The offer reads row 1's structure only; when that read fails there is simply no offer, and
+// the step works as before (applyStandardSetup checks row 1 again when the button is used).
 export async function HeaderStep({ tracker }: { tracker: AdminTracker }) {
   const [rows, today, standard] = await Promise.all([
     loadTopRows(tracker.ref),
     (await loadSheetDeps()).store.today(),
     tracker.state === "draft"
-      ? loadTabData(tracker.ref, 1).then(({ structure }) =>
-          matchStandardTemplate(structure),
-        )
+      ? loadStructure(tracker.ref, 1).then(matchStandardTemplate, (error) => {
+          logEvent("admin.standard_offer_unavailable", {
+            tracker: tracker.id,
+            error: errorSummary(error),
+          });
+          return null;
+        })
       : null,
   ]);
   const suggested = suggestHeaderRow(rows, today);

@@ -9,11 +9,23 @@ import { columnLetter, type TabStructure } from "@/lib/sheets/types";
 // row 1 holds the standard headers, says why not when a write target holds formulas, and offers
 // nothing on a live tracker or another layout.
 
-const fx = vi.hoisted(() => ({ structure: null as unknown }));
+const fx = vi.hoisted(() => ({
+  structure: null as unknown,
+  structureError: null as Error | null,
+  reads: [] as string[],
+}));
 
 vi.mock("@/lib/admin/data", () => ({
   loadTopRows: async () => [["Task ID", "Date"]],
-  loadTabData: async () => ({ structure: fx.structure, rows: [] }),
+  loadStructure: async () => {
+    fx.reads.push("structure");
+    if (fx.structureError) throw fx.structureError;
+    return fx.structure;
+  },
+  loadTabData: async () => {
+    fx.reads.push("rows");
+    return { structure: fx.structure, rows: [] };
+  },
   loadSheetDeps: async () => ({ store: { today: async () => "2026-09-30" } }),
 }));
 vi.mock("@/lib/actions/admin", () => ({
@@ -50,6 +62,8 @@ async function render(state: AdminTracker["state"]) {
 describe("Header row step: the standard setup (11.1)", () => {
   beforeEach(() => {
     fx.structure = structure([...KNIT_STANDARD_V1.headers, "Budget"]);
+    fx.structureError = null;
+    fx.reads = [];
   });
 
   it("offers Use the standard setup on a draft in the standard layout", async () => {
@@ -66,6 +80,20 @@ describe("Header row step: the standard setup (11.1)", () => {
       "This tab has the Knit Standard Tracker v1 columns, but &quot;Status&quot; holds formulas, so Knit cannot write to it. Set it up step by step.",
     );
     expect(html).not.toContain("Use the standard setup");
+  });
+
+  it("reads row 1's structure only, not the tab's rows", async () => {
+    await render("draft");
+    expect(fx.reads).toEqual(["structure"]);
+  });
+
+  it("still shows the header rows, with no offer, when row 1 cannot be read", async () => {
+    fx.structureError = new Error("quota");
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const html = await render("draft");
+    log.mockRestore();
+    expect(html).toContain("Which row holds the column names?");
+    expect(html).not.toContain("Knit Standard Tracker");
   });
 
   it("offers nothing on a live tracker or another layout", async () => {

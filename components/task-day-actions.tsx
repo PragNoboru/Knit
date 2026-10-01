@@ -69,7 +69,9 @@ export function CorrectionButton({
           <DialogHeader>
             <DialogTitle>Correct {dayLabel}</DialogTitle>
             <DialogDescription>
-              Done or Cancelled also closes every later day of this task.
+              Done or Cancelled also closes every later day of this task. Yet to
+              Start, In Progress or Blocked on the day a finished task ended
+              reopens it.
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-2">

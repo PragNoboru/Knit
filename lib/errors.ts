@@ -26,7 +26,7 @@ const MESSAGES: Record<string, string> = {
     "Yesterday is still being closed. Try again in a few minutes.",
   no_open_task_day: "This task has no open day to change.",
   correction_would_orphan_task:
-    "This correction would leave the task with no open day.",
+    "This correction would leave the task with no open day. To reopen a finished task, correct the day it ended.",
   task_day_not_found: "This day of the task no longer exists.",
   task_day_not_locked:
     "Only a closed day can be corrected. Change the status instead.",

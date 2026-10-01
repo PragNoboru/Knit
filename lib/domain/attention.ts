@@ -88,7 +88,7 @@ export function describeAttention(
       return `Added with a due date already past (${day(detail.dueDate)}), so it starts today as a spillover.`;
     case "conflict":
       if (detail.reason === "reopened_in_source")
-        return `The sheet reopened a task Knit has closed ("${str(detail.sourceWord)}"). Knit kept ${status(detail.knit)}.`;
+        return `The sheet reopened a task Knit has closed ("${str(detail.sourceWord)}"). Knit kept ${status(detail.knit)}. To reopen it, correct the day it ended in the task drawer.`;
       return `Knit says ${status(detail.knit)}, the sheet says "${str(detail.sheet ?? detail.source)}". Knit's value was kept.`;
     case "duplicate_knit_id":
       return `This row had a Knit ID already used ${detail.otherTracker ? "in another tracker" : "by another row"}, so it got a new one.`;

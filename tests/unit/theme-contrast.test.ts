@@ -3,6 +3,8 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import manifest from "@/app/manifest";
+
 // PRD 12.2, Noboru brand theme: every text pair meets WCAG AA (4.5:1) and the
 // focus ring meets 3:1, in light and in dark. The values are read from
 // app/globals.css, so a token change that breaks contrast fails here.
@@ -213,15 +215,17 @@ describe("the Noboru mark (PRD 12.2)", () => {
   const LIME = "0,0 94,0 94,107";
   const DARK = "6,30 6,136 100,136";
 
-  it.each(["components/brand-mark.tsx", "app/icon.svg", "app/apple-icon.tsx"])(
-    "%s draws the same two triangles",
-    (file) => {
-      const source = readFileSync(file, "utf8");
-      expect(source).toContain(`points="${LIME}"`);
-      expect(source).toContain(`points="${DARK}"`);
-      expect(source).toContain("#77cb35");
-    },
-  );
+  it.each([
+    "components/brand-mark.tsx",
+    "app/icon.svg",
+    "app/apple-icon.tsx",
+    "public/icon-tile.svg",
+  ])("%s draws the same two triangles", (file) => {
+    const source = readFileSync(file, "utf8");
+    expect(source).toContain(`points="${LIME}"`);
+    expect(source).toContain(`points="${DARK}"`);
+    expect(source).toContain("#77cb35");
+  });
 
   it("is decorative in the app, so the wordmark keeps its accessible name", () => {
     expect(readFileSync("components/brand-mark.tsx", "utf8")).toContain(
@@ -236,5 +240,36 @@ describe("the Noboru mark (PRD 12.2)", () => {
     const icon = readFileSync("app/icon.svg", "utf8");
     expect(icon).toContain("#212121");
     expect(icon).toMatch(/@media \(prefers-color-scheme: dark\)[^}]*#f5f5f5/);
+  });
+
+  it("the install icons sit on white, so the dark triangle shows on a dark launcher", () => {
+    const srcs = manifest().icons?.map((icon) => icon.src) ?? [];
+    expect(srcs).toEqual(["/icon-tile.svg", "/apple-icon"]);
+    const tile = readFileSync("public/icon-tile.svg", "utf8");
+    expect(tile).toMatch(/<rect width="180" height="180" fill="#ffffff"\/>/);
+    expect(tile).toContain('fill="#212121"');
+    expect(readFileSync("app/apple-icon.tsx", "utf8")).toContain(
+      'background: "#ffffff"',
+    );
+  });
+});
+
+describe("the title bar follows the system theme (PRD 12.2)", () => {
+  const layout = readFileSync("app/layout.tsx", "utf8");
+
+  it.each(["light", "dark"] as const)(
+    "%s: the viewport themeColor is the %s --background",
+    (theme) => {
+      const background = themes[theme].get("background");
+      expect(layout).toContain(
+        `{ media: "(prefers-color-scheme: ${theme})", color: "${background}" }`,
+      );
+    },
+  );
+
+  it("the manifest colours match the light theme", () => {
+    const { theme_color, background_color } = manifest();
+    expect(theme_color).toBe(themes.light.get("background"));
+    expect(background_color).toBe(themes.light.get("background"));
   });
 });

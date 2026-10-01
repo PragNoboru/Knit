@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Poppins } from "next/font/google";
 import "./globals.css";
 
@@ -12,6 +12,15 @@ const poppins = Poppins({
 
 export const metadata: Metadata = {
   title: "Knit",
+};
+
+// PRD 12.2: light and dark follow the system, so the browser and installed-app
+// title bar match --background in each theme (app/globals.css).
+export const viewport: Viewport = {
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#ffffff" },
+    { media: "(prefers-color-scheme: dark)", color: "#141414" },
+  ],
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

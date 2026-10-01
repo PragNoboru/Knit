@@ -1,4 +1,5 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
@@ -107,6 +108,8 @@ const PAIRS: [string, string, number][] = [
   ["sidebar-primary-foreground", "sidebar-primary", 4.5],
   ["ring", "background", 3],
   ["ring", "card", 3],
+  // The destructive button's focus border is solid --destructive.
+  ["destructive", "background", 3],
 ];
 
 describe("theme contrast (PRD 12.2)", () => {
@@ -148,6 +151,61 @@ describe("theme contrast (PRD 12.2)", () => {
     expect(
       contrast(token("dark", "primary"), token("dark", "background")),
     ).toBeGreaterThanOrEqual(4.5);
+  });
+});
+
+// The --ring pairs above hold only for a solid ring. A halo such as
+// `ring-ring/50` blends with the surface (#3d7a12 at 50% over white is about
+// 2.1:1), so it must never be the only focus indicator.
+function sourceFiles(dir: string): string[] {
+  return readdirSync(dir, { recursive: true, encoding: "utf8" })
+    .filter((file) => /\.(tsx?|css)$/.test(file))
+    .map((file) => join(dir, file));
+}
+
+const SOURCES = [...sourceFiles("app"), ...sourceFiles("components")].map(
+  (file) => ({ file, lines: readFileSync(file, "utf8").split(/\r?\n/) }),
+);
+
+function linesMatching(pattern: RegExp): string[] {
+  return SOURCES.flatMap(({ file, lines }) =>
+    lines.flatMap((line, i) =>
+      pattern.test(line) ? [`${file}:${i + 1}`] : [],
+    ),
+  );
+}
+
+describe("focus indicators are solid (PRD 12.2, 3:1 for focus rings)", () => {
+  it("scans the app and component sources", () => {
+    expect(SOURCES.length).toBeGreaterThan(20);
+  });
+
+  it("the default focus outline (plain links) uses the solid ring colour", () => {
+    expect(css).toMatch(/@apply border-border outline-ring;/);
+    expect(linesMatching(/outline-ring\/\d/)).toEqual([]);
+  });
+
+  it("every translucent ring halo sits next to a solid ring border", () => {
+    const halos = linesMatching(/ring-ring\/\d/);
+    expect(halos.length).toBeGreaterThan(0);
+    const alone = SOURCES.flatMap(({ file, lines }) =>
+      lines.flatMap((line, i) =>
+        /ring-ring\/\d/.test(line) &&
+        !/focus-visible:border-ring(?![\w/-])/.test(line)
+          ? [`${file}:${i + 1}`]
+          : [],
+      ),
+    );
+    expect(alone).toEqual([]);
+  });
+
+  it("no focus border is made translucent", () => {
+    expect(linesMatching(/focus-visible:border-[\w-]+\/\d/)).toEqual([]);
+  });
+
+  it("the calendar day cells use the solid ring", () => {
+    const calendar = readFileSync("components/month-calendar.tsx", "utf8");
+    expect(calendar).toMatch(/focus-visible:ring-ring(?![\w/-])/);
   });
 });
 

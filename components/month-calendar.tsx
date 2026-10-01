@@ -124,7 +124,7 @@ export function MonthCalendar({
                 aria-current={day === selected ? "date" : undefined}
                 title={off ? (info?.reason ?? undefined) : undefined}
                 className={cn(
-                  "flex aspect-square min-h-11 flex-col justify-between rounded-lg border p-1 text-left transition-colors hover:border-foreground/40 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none sm:aspect-auto sm:h-20 sm:p-2",
+                  "flex aspect-square min-h-11 flex-col justify-between rounded-lg border p-1 text-left transition-colors hover:border-foreground/40 focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none sm:aspect-auto sm:h-20 sm:p-2",
                   COLOUR[colour],
                   off && "bg-hatched text-muted-foreground",
                   day === selected && "ring-2 ring-foreground",

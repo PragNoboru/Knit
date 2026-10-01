@@ -109,6 +109,7 @@ describe("cellsFor: a revert clears Completed On only from a Done Knit read (N24
           dueDate: "2026-09-28",
           historyOnly: false,
           sourceSnapshot: snapshot,
+          removedAtSource: false,
         },
         taskDays: [],
       },

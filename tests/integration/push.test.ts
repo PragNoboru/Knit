@@ -859,26 +859,46 @@ describe("push (PRD 10.4)", () => {
 // the task's. push_result's superseded-and-resent branch moves the tracker's state_version, so
 // it locks the tracker first too, then the task, then the write-back. Two transactions taking
 // these locks in opposite orders could deadlock; one connection cannot show that, so the
-// function's own lock statements are checked in order.
-describe("push_result lock order (N49)", () => {
+// functions' own lock statements are checked in order.
+describe("lock order (N49)", () => {
   const db = useTestDb();
 
-  it("locks the tracker, then the task, then the write-back, before moving state_version", async () => {
+  async function source(name: string) {
     const [fn] = await db().query<{ src: string }>(
-      "select prosrc as src from pg_proc where proname = 'push_result' and pronamespace = 'public'::regnamespace",
+      "select prosrc as src from pg_proc where proname = $1 and pronamespace = 'public'::regnamespace",
+      [name],
     );
     const src = fn!.src;
-    const at = (pattern: RegExp) => {
+    return (pattern: RegExp) => {
       const match = pattern.exec(src);
       expect(match, String(pattern)).not.toBeNull();
       return match!.index;
     };
-    const tracker = at(/from trackers where id = v_tracker_id for update/);
+  }
+
+  it("push_result locks the tracker, then the task, then the write-back, before moving state_version", async () => {
+    const at = await source("push_result");
+    // FOR NO KEY UPDATE: it waits for the N49 RPCs' FOR UPDATE, but never for the FOR KEY SHARE
+    // a foreign-key insert takes on the tracker (events, outbox, attention_items).
+    const tracker = at(
+      /from trackers where id = v_tracker_id for no key update;/,
+    );
     const task = at(/from tasks where id = v_task_id for update/);
     const outbox = at(/from outbox where id = p_outbox_id for update/);
     const stateVersion = at(/update trackers set state_version/);
     expect(tracker).toBeLessThan(task);
     expect(task).toBeLessThan(outbox);
     expect(outbox).toBeLessThan(stateVersion);
+  });
+
+  it("the holiday trigger locks the trackers before it moves task-days off a new holiday", async () => {
+    const at = await source("holidays_refresh_calendar");
+    const trackers = at(/order by t\.id\s+for update of t;/);
+    const moved = at(/update task_days d\s+set day = v_next/);
+    const events = at(/insert into events/);
+    const stateVersion = at(/update trackers set state_version/);
+    expect(trackers).toBeLessThan(moved);
+    expect(moved).toBeLessThan(events);
+    expect(events).toBeLessThan(stateVersion);
   });
 });

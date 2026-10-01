@@ -3,8 +3,10 @@ import { fileURLToPath } from "node:url";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AdminTracker } from "@/lib/admin/data";
+import { calendarDaysFromRules, type CalendarDay } from "@/lib/domain/calendar";
 import { TrackerConfig } from "@/lib/domain/config";
 import {
+  GO_LIVE_NEEDS_A_DATE,
   statusChoices,
   statusField,
   type DraftConfig,
@@ -51,6 +53,8 @@ const fx = vi.hoisted(() => ({
   tab: null as unknown,
   unmapped: [] as string[],
   today: "2026-09-30",
+  /** calendar_days as load_sync_context reads them. */
+  calendar: [] as unknown[],
   leaseSkipped: false,
   structure: null as unknown,
   /** Structures read one after another, before `structure` (an Error is thrown). */
@@ -168,6 +172,7 @@ vi.mock("@/lib/admin/data", () => ({
   loadSheetDeps: async () => ({
     store: {
       today: async () => fx.today,
+      loadContext: async () => ({ calendar: fx.calendar, aliases: [] }),
       trackers: async () => fx.sheetTrackers,
       pullRequests: async () => ({}),
     },
@@ -243,6 +248,11 @@ const structure: TabStructure = await source.readStructure(ref, 1);
 const rows = await source.readRows(ref, 1);
 
 const TRACKER_ID = "00000000-0000-4000-8000-0000000000f1";
+const holidays = (
+  await import("../../fixtures/holidays.json", { with: { type: "json" } })
+).default.holidays;
+const calendarTo = (last: string): CalendarDay[] =>
+  calendarDaysFromRules(holidays, "2026-09-01", last);
 
 function trackerWith(
   state: AdminTracker["state"],
@@ -318,6 +328,8 @@ beforeEach(() => {
   fx.tab = { structure, rows };
   fx.structure = structure;
   fx.unmapped = [];
+  fx.today = "2026-09-30";
+  fx.calendar = calendarTo("2026-12-31");
   fx.leaseSkipped = false;
   fx.tracker = trackerWith("active");
   fx.sheetTrackers = [];
@@ -460,25 +472,52 @@ describe("activate (11 step 9)", () => {
     expect(rpcNames()).not.toContain("set_tracker_state");
   });
 
-  it("goes live today unless a date was saved at step 7 (finding 61)", async () => {
+  const goLiveWritten = () =>
+    fx.calls.find((c) => c.table === "trackers" && c.op === "update")
+      ?.payload as { go_live_date?: string } | undefined;
+
+  it("goes live on the next working day unless a date was saved at step 7 (N42)", async () => {
     fx.sheetTrackers = [{}];
     await expect(actions.activateTracker(TRACKER_ID)).rejects.toThrow(
       /redirect:/,
     );
-    const update = fx.calls.find(
-      (c) => c.table === "trackers" && c.op === "update",
+    expect(goLiveWritten()).toMatchObject({ go_live_date: "2026-10-01" });
+
+    // Thu 1 Oct: 2 Oct is Gandhi Jayanti, 3 Oct a 1st Saturday (a working day).
+    fx.calls = [];
+    fx.today = "2026-10-01";
+    await expect(actions.activateTracker(TRACKER_ID)).rejects.toThrow(
+      /redirect:/,
     );
-    expect(update?.payload).toMatchObject({ go_live_date: "2026-09-30" });
+    expect(goLiveWritten()).toMatchObject({ go_live_date: "2026-10-03" });
 
     fx.calls = [];
     fx.tracker = trackerWith("draft", { ...META, goLiveChosen: true });
     await expect(actions.activateTracker(TRACKER_ID)).rejects.toThrow(
       /redirect:/,
     );
-    expect(
-      fx.calls.find((c) => c.table === "trackers" && c.op === "update")
-        ?.payload,
-    ).toMatchObject({ go_live_date: "2026-09-28" });
+    expect(goLiveWritten()).toMatchObject({ go_live_date: "2026-09-28" });
+  });
+
+  it("asks for a date at step 7, writing nothing, when the calendar has no next working day (N42)", async () => {
+    fx.sheetTrackers = [{}];
+    fx.calendar = calendarTo("2026-09-30");
+    const result = await actions.activateTracker(TRACKER_ID);
+    expect(result.error).toBe(GO_LIVE_NEEDS_A_DATE);
+    expect(goLiveWritten()).toBeUndefined();
+    expect(fx.sheet).not.toContain("ensureKnitColumns");
+    expect(rpcNames()).not.toContain("set_tracker_state");
+  });
+
+  it("uses a saved date even when the calendar has no next working day (N19 b)", async () => {
+    fx.sheetTrackers = [{}];
+    fx.calendar = calendarTo("2026-09-30");
+    fx.tracker = trackerWith("draft", { ...META, goLiveChosen: true });
+    await expect(actions.activateTracker(TRACKER_ID)).rejects.toThrow(
+      /redirect:/,
+    );
+    expect(goLiveWritten()).toMatchObject({ go_live_date: "2026-09-28" });
+    expect(fx.sheet).toContain("ensureKnitColumns");
   });
 });
 

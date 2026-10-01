@@ -11,12 +11,15 @@ import { isEmptyRow, normaliseRow } from "@/lib/domain/rows";
 import {
   DraftConfig,
   finalConfig,
+  goLiveDefault,
+  goLiveSaved,
   statusChoices,
   unmappedChoices,
 } from "@/lib/domain/wizard";
 import { jobDeps } from "@/lib/jobs/cron";
 import { KNIT_ID_HEADER, type TabRef } from "@/lib/sheets/types";
 import { callRpc, getSupabase } from "@/lib/supabase/server";
+import type { LocalDate } from "@/lib/time";
 
 /**
  * Data for the admin screens (PRD 11, 12.8), read as the signed-in admin (RLS and the admin
@@ -140,6 +143,24 @@ export const loadSheetDeps = cache(async () => {
   return { store, source };
 });
 
+/**
+ * 11 steps 7 and 9 (N42): the go-live step 7 shows and activation would use. A saved date, or a
+ * tracker's once it is not a draft, as it is (N19 b). Otherwise the next working day after
+ * today, or null when the calendar does not cover it; only then are today and the calendar
+ * read.
+ */
+export async function currentGoLive(
+  tracker: AdminTracker,
+): Promise<LocalDate | null> {
+  if (goLiveSaved(tracker)) return tracker.goLiveDate;
+  const { store } = await loadSheetDeps();
+  const [today, context] = await Promise.all([
+    store.today(),
+    store.loadContext(),
+  ]);
+  return goLiveDefault(tracker, today, calendarFromDays(context.calendar));
+}
+
 /** 11 step 3: the first ten rows of a tab, as shown. */
 export const loadTopRows = cache(async (ref: TabRef) => {
   const { source } = await loadSheetDeps();
@@ -201,6 +222,8 @@ export async function loadNormalisedRows(tracker: AdminTracker) {
   const aliases = aliasMap(context.aliases);
   return {
     today,
+    /** 11 step 8: the go-live activation would use (N42); null when step 7 must choose one. */
+    goLive: goLiveDefault(tracker, today, calendar),
     config: config.data,
     rows: rows
       .filter((row) => !isEmptyRow(row, config.data))

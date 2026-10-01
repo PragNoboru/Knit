@@ -10,6 +10,7 @@ import {
   type LocalDate,
 } from "@/lib/time";
 
+import { CalendarNotCoveredError, type WorkingCalendar } from "./calendar";
 import { TRACKER_COLORS, type TrackerColor } from "./cards";
 import {
   KnitUserStatus,
@@ -49,7 +50,7 @@ export const DraftConfig = z.object({
   cancelReasons: z.record(z.string(), z.string()).optional(),
   writeBack: TrackerConfig.shape.writeBack.partial().optional(),
   completedOnFormat: TrackerConfig.shape.completedOnFormat.optional(),
-  /** 11 step 7: the admin saved a go-live date; until then it defaults to today. */
+  /** 11 step 7: the admin saved a go-live date; until then it defaults to the next working day (N42). */
   goLiveChosen: z.boolean().optional(),
 });
 export type DraftConfig = z.infer<typeof DraftConfig>;
@@ -431,17 +432,40 @@ export function unknownOwnerNames(rows: readonly NormalisedRow[]): string[] {
   return [...new Set(rows.flatMap((row) => row.unknownOwners))].sort();
 }
 
+/** 11 step 7 (N42): said when there is no default go-live and the admin has not saved one. */
+export const GO_LIVE_NEEDS_A_DATE =
+  "Choose a go-live date at step 7: the working-day calendar does not reach the next working day yet.";
+
 /**
- * 11 step 7: go-live defaults to today, the day the admin is at step 7 or activates, not the
- * day setup started; a date the admin saved at step 7 stays. Once live it is fixed (N19 b).
+ * 11 step 7 (N42, N19 b): the tracker's go-live is a date already settled, the one saved at
+ * step 7 or the date of a tracker no longer a draft, rather than the default worked out now.
+ */
+export function goLiveSaved(tracker: {
+  state: string;
+  draft: DraftConfig;
+}): boolean {
+  return tracker.state !== "draft" || tracker.draft.goLiveChosen === true;
+}
+
+/**
+ * 11 step 7 (N42, 6.2): until the admin saves a date at step 7, go-live is the first working
+ * day after today, worked out from the day the admin is at step 7, the preview or the activate
+ * step, or activates, not the day setup started. Null when the calendar does not cover that
+ * day: it is never guessed (invariant 7), so the admin must choose a date. A date the admin
+ * saved at step 7 stays, whatever it is, and is fixed once the tracker is live (N19 b).
  */
 export function goLiveDefault(
   tracker: { state: string; goLiveDate: LocalDate; draft: DraftConfig },
   today: LocalDate,
-): LocalDate {
-  return tracker.state === "draft" && !tracker.draft.goLiveChosen
-    ? today
-    : tracker.goLiveDate;
+  calendar: WorkingCalendar,
+): LocalDate | null {
+  if (goLiveSaved(tracker)) return tracker.goLiveDate;
+  try {
+    return calendar.nextWorkingDay(today);
+  } catch (error) {
+    if (error instanceof CalendarNotCoveredError) return null;
+    throw error;
+  }
 }
 
 /** 11 step 7: the first colour of the palette no other tracker uses. */

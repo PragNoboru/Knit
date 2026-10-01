@@ -12,6 +12,7 @@ import {
   unmappedStatusWords,
   type AdminTracker,
 } from "@/lib/admin/data";
+import { calendarFromDays } from "@/lib/domain/calendar";
 import { TRACKER_COLORS } from "@/lib/domain/cards";
 import {
   KnitUserStatus,
@@ -26,6 +27,7 @@ import {
   DraftConfig,
   draftProblems,
   finalConfig,
+  GO_LIVE_NEEDS_A_DATE,
   goLiveDefault,
   nextColour,
   statusChoices,
@@ -567,7 +569,7 @@ export async function saveOwners(
 
 /**
  * 11 step 7. The go-live date can change only before activation (N19 b). Once saved here it is
- * the admin's choice; until then it defaults to today (see activateTracker).
+ * the admin's choice; until then it defaults to the next working day (N42; see activateTracker).
  */
 export async function saveDetails(
   trackerId: string,
@@ -615,7 +617,8 @@ export async function saveDetails(
  * 11 step 9: adds the Knit ID and Knit Note columns, activates the tracker and runs its first
  * pull (which writes the IDs). Then the backlog review (step 10) when old rows are open.
  * Activation is blocked while any word of the status column, as the tab holds it now, is
- * unmapped (11 step 5). Go-live is today unless the admin chose a date at step 7.
+ * unmapped (11 step 5). Go-live is the next working day unless the admin saved a date at
+ * step 7 (N42); with no saved date and no calendar day to default to, nothing is written.
  */
 export async function activateTracker(trackerId: string): Promise<FormState> {
   const denied = await adminRefusal();
@@ -633,7 +636,16 @@ export async function activateTracker(trackerId: string): Promise<FormState> {
     if (problems.length > 0 || !config.success)
       return { error: problems[0]?.problem ?? "The setup is not complete." };
     const { store, source } = await loadSheetDeps();
-    const goLive = goLiveDefault(tracker, await store.today());
+    const [today, context] = await Promise.all([
+      store.today(),
+      store.loadContext(),
+    ]);
+    const goLive = goLiveDefault(
+      tracker,
+      today,
+      calendarFromDays(context.calendar),
+    );
+    if (goLive === null) return { error: GO_LIVE_NEEDS_A_DATE };
     const { error } = await service
       .from("trackers")
       .update({ config: config.data, go_live_date: goLive })

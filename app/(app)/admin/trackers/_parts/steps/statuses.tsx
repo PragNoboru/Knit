@@ -11,9 +11,8 @@ import { loadTabData, type AdminTracker } from "@/lib/admin/data";
 import { normaliseKey, USER_STATUSES } from "@/lib/domain/config";
 import {
   matchStandardTemplate,
-  standardNotOffered,
   standardStatusesLeft,
-  standardWordsLeft,
+  standardStatusNotices,
 } from "@/lib/domain/standard-template";
 import { STATUS_LABELS } from "@/lib/domain/status";
 import {
@@ -78,20 +77,12 @@ export async function StatusesStep({
   // 11.1, N69: after the standard setup, say what it left, worked out from the tab and draft.
   const template =
     standard && !switching ? matchStandardTemplate(structure)?.template : null;
-  const left = template
-    ? standardStatusesLeft(template, choices, map, words, writeBack)
-    : null;
-  const notices = left
-    ? [
-        left.wordsToMap.length > 0 ? standardWordsLeft(left.wordsToMap) : null,
-        left.notOffered.length > 0
-          ? standardNotOffered(
-              statusHeader,
-              left.notOffered,
-              left.writeBacksToChoose,
-            )
-          : null,
-      ].filter((notice): notice is string => notice !== null)
+  const notices = template
+    ? standardStatusNotices(
+        template,
+        standardStatusesLeft(template, choices, map, words, writeBack),
+        statusHeader,
+      )
     : [];
   const writeDefault = (status: (typeof USER_STATUSES)[number]) => {
     const value = writeBack[status];
@@ -120,6 +111,10 @@ export async function StatusesStep({
             value={writeHeader ?? ""}
           />
         </>
+      ) : null}
+      {template ? (
+        // 11.1: step 6 then shows "Standard setup applied" too.
+        <input type="hidden" name="standard" value="applied" />
       ) : null}
       {notices.map((notice) => (
         <p key={notice} role="status" className="text-sm">

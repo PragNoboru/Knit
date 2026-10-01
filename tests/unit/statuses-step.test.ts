@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AdminTracker } from "@/lib/admin/data";
 import {
   KNIT_STANDARD_V1,
+  standardNotOffered,
   standardWordsLeft,
 } from "@/lib/domain/standard-template";
 import { STATUSES_LIVE_HINT } from "@/lib/domain/wizard";
@@ -158,5 +159,59 @@ describe("Statuses step after the standard setup (11.1, N69)", () => {
     expect(await render("draft", null, { draft: standardDraft })).not.toContain(
       "Standard setup applied",
     );
+  });
+
+  // No dropdown, and nobody uses Blocked: the column does not offer it.
+  const noBlocked = () => {
+    fx.tab = {
+      structure: {
+        headers,
+        formulaColumns: [],
+        duplicateHeaders: [],
+        validations: {},
+      },
+      rows: ["Not started", "In progress", "Done", "Cancelled"].map(
+        (word, i) => ({ rowNumber: i + 2, cells: { status: text(word) } }),
+      ),
+    };
+  };
+  const withoutBlocked = Object.fromEntries(
+    Object.entries(standardDraft.writeBack!).filter(([s]) => s !== "blocked"),
+  ) as NonNullable<AdminTracker["draft"]["writeBack"]>;
+
+  it("names a word the column does not offer while its write-back is still to choose", async () => {
+    noBlocked();
+    const html = await render("draft", null, {
+      draft: { ...standardDraft, writeBack: withoutBlocked },
+      standard: true,
+    });
+    expect(html).toContain(
+      standardNotOffered("Status", ["Blocked"], ["blocked"]).replaceAll(
+        '"',
+        "&quot;",
+      ),
+    );
+    expect(html).toContain('name="standard" value="applied"');
+  });
+
+  it("says nothing about it once that write-back is chosen, so the list is never empty", async () => {
+    noBlocked();
+    const html = await render("draft", null, {
+      draft: {
+        ...standardDraft,
+        writeBack: { ...withoutBlocked, blocked: null },
+      },
+      standard: true,
+    });
+    expect(html).not.toContain("does not offer");
+    expect(html).not.toContain("write-back value for .");
+    // The flag still reaches step 6.
+    expect(html).toContain('name="standard" value="applied"');
+  });
+
+  it("does not hand the flag on when the page was not opened by the preset", async () => {
+    noBlocked();
+    const html = await render("draft", null, { draft: standardDraft });
+    expect(html).not.toContain('name="standard"');
   });
 });

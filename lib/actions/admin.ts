@@ -591,6 +591,10 @@ export async function saveStatuses(
     { newStatusColumns: pending !== null },
   );
   if (error) return { error };
+  // 11.1: step 5 opened by the standard setup hands its notice on to step 6. A fixed flag,
+  // never sheet content, and only on a draft (afterSave sends a live tracker elsewhere).
+  if (tracker.state === "draft" && form.get("standard") === "applied")
+    redirect(`/admin/trackers/${tracker.id}/setup/owners?standard=applied`);
   afterSave(tracker, "statuses");
 }
 

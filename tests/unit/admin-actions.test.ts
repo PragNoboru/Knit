@@ -1110,4 +1110,42 @@ describe("Use the standard setup (11.1, N68, N69)", () => {
     ).rejects.toThrow(/redirect:/);
     expect(savedConfigs()[0]?.statusMap?.[""]).toBe("yet_to_start");
   });
+
+  it("Map statuses opened by the preset hands the notice on to Owners and policies (11.1)", async () => {
+    const expected = TrackerConfig.parse(
+      registry.trackers.find((t) => t.name === "Knit Standard · Example"),
+    );
+    const form = () => {
+      const f = new FormData();
+      for (const choice of statusChoices(
+        stdRows,
+        "Status",
+        stdStructure.validations.status?.options ?? null,
+        { mappedBlank: true },
+      ))
+        f.set(statusField(choice.key), expected.statusMap[choice.key]!);
+      for (const [status, value] of Object.entries(expected.writeBack))
+        f.set(`writeBack:${status}`, value!);
+      return f;
+    };
+    fx.tracker = trackerWith("draft", { ...expected });
+    const flagged = form();
+    flagged.set("standard", "applied");
+    await expect(
+      actions.saveStatuses(TRACKER_ID, { error: null }, flagged),
+    ).rejects.toThrow(
+      /^redirect:\/admin\/trackers\/[0-9a-f-]+\/setup\/owners\?standard=applied$/,
+    );
+    // Without the flag, step 6 opens as usual.
+    await expect(
+      actions.saveStatuses(TRACKER_ID, { error: null }, form()),
+    ).rejects.toThrow(
+      /^redirect:\/admin\/trackers\/[0-9a-f-]+\/setup\/owners$/,
+    );
+    // A live tracker ignores it.
+    fx.tracker = trackerWith("active", { ...expected });
+    await expect(
+      actions.saveStatuses(TRACKER_ID, { error: null }, flagged),
+    ).rejects.toThrow(/redirect:.*saved=1$/);
+  });
 });

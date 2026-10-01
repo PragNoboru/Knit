@@ -153,7 +153,11 @@ export function matchStandardTemplate(
 export interface StandardStatusesLeft {
   /** Words in the Status column (its rows and dropdown) the status map does not cover. */
   wordsToMap: string[];
-  /** The template's words the Status column does not offer, as the template spells them. */
+  /**
+   * The template's words the Status column does not offer, as the template spells them, whose
+   * Knit status still has no write-back value. Once a write-back is chosen for it, the word
+   * needs nothing more and is not named.
+   */
   notOffered: string[];
   /** Knit statuses still without a write-back value. */
   writeBacksToChoose: UserStatus[];
@@ -172,13 +176,44 @@ export function standardStatusesLeft(
     wordsToMap: choices
       .filter((choice) => statusMap?.[choice.key] === undefined)
       .map((choice) => (choice.word === "" ? "(blank)" : choice.word)),
-    notOffered: USER_STATUSES.map((s) => template.statusWords[s]).filter(
-      (word) => !offered.has(normaliseKey(word)),
-    ),
+    notOffered: USER_STATUSES.filter(
+      (status) =>
+        writeBack?.[status] === undefined &&
+        !offered.has(normaliseKey(template.statusWords[status])),
+    ).map((status) => template.statusWords[status]),
     writeBacksToChoose: USER_STATUSES.filter(
       (status) => writeBack?.[status] === undefined,
     ),
   };
+}
+
+/**
+ * 11.1: the notices step 5 shows after the preset. The "does not offer" sentence names only
+ * the words whose Knit status still needs a write-back value, and those statuses, so it never
+ * appears with an empty list.
+ */
+export function standardStatusNotices(
+  template: StandardTemplate,
+  left: StandardStatusesLeft,
+  statusColumn: string,
+): string[] {
+  const notices: string[] = [];
+  if (left.wordsToMap.length > 0)
+    notices.push(standardWordsLeft(left.wordsToMap));
+  const statuses = USER_STATUSES.filter(
+    (status) =>
+      left.writeBacksToChoose.includes(status) &&
+      left.notOffered.includes(template.statusWords[status]),
+  );
+  if (statuses.length > 0)
+    notices.push(
+      standardNotOffered(
+        statusColumn,
+        statuses.map((status) => template.statusWords[status]),
+        statuses,
+      ),
+    );
+  return notices;
 }
 
 const anyLeft = (left: StandardStatusesLeft) =>

@@ -10,6 +10,7 @@ import {
   standardFormulaProblem,
   standardSetupDraft,
   standardStatusesLeft,
+  standardStatusNotices,
   type StandardMatch,
 } from "@/lib/domain/standard-template";
 import { renderTemplate } from "@/lib/domain/templates";
@@ -294,6 +295,40 @@ describe("standardSetupDraft (11.1, N69)", () => {
       notOffered: ["Blocked"],
       writeBacksToChoose: ["blocked"],
     });
+  });
+
+  it("names a word not offered only while its write-back is still to choose (11.1)", () => {
+    const words = ["Not started", "In progress", "Done", "Cancelled"];
+    const choices = words.map((w) => word(w));
+    const { patch } = standardSetupDraft(
+      matched(structure(V1)),
+      structure(V1),
+      choices,
+      words,
+    );
+    const notices = (writeBack: typeof patch.writeBack) =>
+      standardStatusNotices(
+        KNIT_STANDARD_V1,
+        standardStatusesLeft(
+          KNIT_STANDARD_V1,
+          choices,
+          patch.statusMap,
+          words,
+          writeBack,
+        ),
+        "Status",
+      );
+    expect(notices(patch.writeBack)).toEqual([
+      'Standard setup applied. "Status" does not offer Blocked, so choose a write-back value for Blocked.',
+    ]);
+    // Step 5 saved with Leave unchanged for Blocked, then opened again with the flag.
+    expect(notices({ ...patch.writeBack, blocked: null })).toEqual([]);
+    expect(
+      standardStatusesLeft(KNIT_STANDARD_V1, choices, patch.statusMap, words, {
+        ...patch.writeBack,
+        blocked: null,
+      }).notOffered,
+    ).toEqual([]);
   });
 
   it("records the tab's formula columns as read-only", () => {

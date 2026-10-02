@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { normaliseKey, TrackerConfig } from "@/lib/domain/config";
 import {
   KNIT_STANDARD_V1,
+  KNIT_STANDARD_V2,
   matchStandardTemplate,
   STANDARD_TEMPLATES,
   standardFormulaProblem,
@@ -163,11 +164,115 @@ describe("matchStandardTemplate (N68)", () => {
     ).toBe(null);
   });
 
-  it("lists every version once, newest first (N70)", () => {
+  it("lists every version once, newest first (N70, N74)", () => {
     const ids = STANDARD_TEMPLATES.map((t) => t.id);
     expect(new Set(ids).size).toBe(ids.length);
-    expect(ids[0]).toBe("knit-standard-v1");
+    expect(ids).toEqual(["knit-standard-v2", "knit-standard-v1"]);
     expect(KNIT_STANDARD_V1.headers).toHaveLength(14);
+  });
+});
+
+describe("Knit Standard Tracker v2 (N74)", () => {
+  const V2 = [...KNIT_STANDARD_V2.headers];
+
+  it("is v1 with Maker right after Owner, columns A to O", () => {
+    expect(V2).toEqual([
+      "Task ID",
+      "Date",
+      "End date",
+      "Task",
+      "Details / done when",
+      "Workstream",
+      "Owner",
+      "Maker",
+      "Priority",
+      "Status",
+      "Stage",
+      "Done on",
+      "Depends on",
+      "Link",
+      "Notes",
+    ]);
+    // v1 never changes (N70).
+    expect(V1).toEqual([
+      "Task ID",
+      "Date",
+      "End date",
+      "Task",
+      "Details / done when",
+      "Workstream",
+      "Owner",
+      "Priority",
+      "Status",
+      "Stage",
+      "Done on",
+      "Depends on",
+      "Link",
+      "Notes",
+    ]);
+    expect(KNIT_STANDARD_V1).toMatchObject({
+      ownerHeader: "Owner",
+      checkerHeader: null,
+    });
+  });
+
+  it("matches v2's row 1 as v2 and v1's as v1, never the other way round", () => {
+    expect(matched(structure([...V2, "Budget"])).template).toBe(
+      KNIT_STANDARD_V2,
+    );
+    expect(matched(structure(V1)).template).toBe(KNIT_STANDARD_V1);
+    // v1 with a Maker column after Notes is still v1: Maker is then a brand column.
+    expect(matched(structure([...V1, "Maker"])).template).toBe(
+      KNIT_STANDARD_V1,
+    );
+    // Maker anywhere else is neither.
+    const makerFirst = ["Maker", ...V1];
+    expect(matchStandardTemplate(structure(makerFirst))).toBe(null);
+  });
+
+  it("names v2 in its copy (11.1)", () => {
+    expect(matchStandardTemplate(structure(V2, ["Status"]))?.problem).toBe(
+      'This tab has the Knit Standard Tracker v2 columns, but "Status" holds formulas, so Knit cannot write to it. Set it up step by step.',
+    );
+  });
+
+  it("maps Maker as the owner and Owner as the checking owner, the rest as v1 (N73, N74)", () => {
+    const v1 = standardSetupDraft(
+      matched(structure(V1)),
+      structure(V1),
+      [],
+      [],
+    ).patch;
+    const v2 = standardSetupDraft(
+      matched(structure(V2)),
+      structure(V2),
+      [],
+      [],
+    ).patch;
+    expect(v1.columns).toMatchObject({ owner: "Owner", checker: null });
+    expect(v2.columns).toMatchObject({ owner: "Maker", checker: "Owner" });
+    expect({
+      ...v2,
+      columns: { ...v2.columns, owner: "Owner", checker: null },
+    }).toEqual(v1);
+  });
+
+  it("gives exactly the registry of the v2 example, then opens Owners", async () => {
+    const example = await tab("Knit_Standard_Tracker_v2_example", "Tasks");
+    const match = matched(example.structure);
+    expect(match.template).toBe(KNIT_STANDARD_V2);
+    const dropdown = example.structure.validations.status?.options ?? null;
+    const { patch, next } = standardSetupDraft(
+      match,
+      example.structure,
+      statusChoices(example.rows, "Status", dropdown),
+      writeBackOptions(example.rows, "Status", dropdown),
+    );
+    expect(next).toBe("owners");
+    const config = finalConfig({ ...patch, goLiveChosen: true });
+    expect(config.success && config.data).toEqual(
+      TrackerConfig.parse(entry("Knit Standard v2 · Example")),
+    );
   });
 });
 

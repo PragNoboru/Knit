@@ -8,10 +8,11 @@ import {
   type MemoryFile,
 } from "@/lib/sheets/memory";
 import type { TabRef } from "@/lib/sheets/types";
+import { loadXlsxFile } from "@/lib/sheets/xlsx";
 import { pullTracker } from "@/lib/sync/pull";
 import { toSheetsSerial } from "@/lib/time";
 
-import { createUser } from "./support/builders";
+import { createUser, fixtureTrackerConfig } from "./support/builders";
 import { queryAs, setToday, useTestDb, type Db } from "./support/db";
 import { storeFor } from "./support/store";
 
@@ -204,5 +205,75 @@ describe("a tracker with a checking owner column (N73)", () => {
       );
       expect(stored).toEqual({ details: {} });
     });
+  });
+});
+
+describe("the Knit Standard Tracker v2 example (11.1, N74)", () => {
+  const db = useTestDb();
+
+  it("pulls with the standard setup's registry: the Maker's tasks, with their Owner", async () => {
+    await setToday(db(), TODAY);
+    const file = loadXlsxFile(
+      "fixtures/trackers/Knit_Standard_Tracker_v2_example.xlsx",
+    );
+    const source = new MemorySheetSource([file]);
+    const me = await createUser(db(), { role: "admin", name: "Pragaman" });
+    await db().query(
+      `insert into people_aliases (alias_norm, display, user_id)
+       values ('pragaman', 'Pragaman', $1), ('p', 'P', $1), ('creative', 'Creative', null),
+              ('shlok', 'Shlok', null), ('aryan', 'Aryan', null)`,
+      [me],
+    );
+    await source.ensureKnitColumns({ fileId: file.id, sheetId: 0 }, 1);
+    await db().query(
+      `insert into drive_files (file_id, name, mime_type, state) values ($1, $2, 'application/vnd.google-apps.spreadsheet', 'connected')`,
+      [file.id, file.name],
+    );
+    const [tracker] = await db().query<{ id: string }>(
+      `insert into trackers (file_id, sheet_gid, tab_name, name, color, state, config, go_live_date)
+       values ($1, 0, 'Tasks', 'Knit Standard v2 · Example', 'violet', 'active', $2::jsonb, $3) returning id`,
+      [
+        file.id,
+        JSON.stringify(fixtureTrackerConfig("Knit Standard v2 · Example")),
+        "2026-10-01",
+      ],
+    );
+    const pull = async () => {
+      const store = storeFor(db());
+      const [synced] = await store.trackers({ ids: [tracker!.id] });
+      return pullTracker({ store, source }, synced!, { force: true });
+    };
+    expect(await pull()).toMatchObject({
+      outcome: "pulled",
+      stats: { rows: 10, inserted: 10 },
+    });
+    // NOB-08 is Creative's to make, though Pragaman is its Owner; no Riya item (N73).
+    const [counts] = await db().query(
+      `select (select count(*)::int from task_assignees) as assigned,
+              (select count(*)::int from attention_items where kind = 'unknown_owner') as unknown`,
+    );
+    expect(counts).toEqual({ assigned: 9, unknown: 0 });
+
+    const [row] = await queryAs<{ v: unknown }>(
+      db(),
+      { kind: "user", id: me },
+      "select day_view($1) as v",
+      ["2026-10-01"],
+    );
+    const day = DayViewData.parse(row!.v);
+    const budget = day.rows.find((card) => card.sourceRef === "NOB-03");
+    expect(budget?.checker).toEqual({ header: "Owner", raw: "Shlok" });
+
+    const snapshot = () =>
+      db().query(
+        `select (select jsonb_agg(to_jsonb(k) - 'updated_at' - 'source_synced_at' order by id) from tasks k) as tasks,
+                (select jsonb_agg(to_jsonb(d) order by d.id) from task_days d) as days,
+                (select count(*)::int from events) as events`,
+      );
+    const before = await snapshot();
+    expect(await pull()).toMatchObject({
+      stats: { inserted: 0, updated: 0, removed: 0 },
+    });
+    expect(await snapshot()).toEqual(before);
   });
 });

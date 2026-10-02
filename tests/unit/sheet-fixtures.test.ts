@@ -194,6 +194,23 @@ describe("dropdown rules (PRD 6.8, 11 step 5)", () => {
       expect(config.statusMap[normaliseKey(option)], option).toBeDefined();
   });
 
+  it("reads the Knit Standard Tracker v2 Status options from Lists!A2:A6 in column J (N74)", async () => {
+    const entry = registry.trackers.find(
+      (t) => t.name === "Knit Standard v2 · Example",
+    )!;
+    const { structure } = await readTracker(entry);
+    expect(structure.validations.status).toEqual({
+      options: ["Not started", "In progress", "Blocked", "Done", "Cancelled"],
+      source: "Lists!$A$2:$A$6",
+    });
+    expect(
+      structure.headers.find((h) => h.normalised === "status")?.letter,
+    ).toBe("J");
+    expect(
+      structure.headers.find((h) => h.normalised === "maker")?.letter,
+    ).toBe("H");
+  });
+
   it("reports a dropdown fed from a missing tab as unreadable, never guessed", async () => {
     const entry = registry.trackers.find(
       (t) => t.name === "Noboru · CA Campaign",
@@ -202,6 +219,70 @@ describe("dropdown rules (PRD 6.8, 11 step 5)", () => {
     expect(structure.validations.done).toEqual({
       options: null,
       source: "Lists!$A$2:$A$5",
+    });
+  });
+});
+
+describe("Owner and Maker in the v2 example (N72, N73)", () => {
+  const rowsOf = async () => {
+    const entry = registry.trackers.find(
+      (t) => t.name === "Knit Standard v2 · Example",
+    )!;
+    const { rows } = await readTracker(entry);
+    return new Map(rows.map((r) => [r.sourceRef, r]));
+  };
+
+  it("assigns the Maker, or the Owner when Maker is blank, and keeps the Owner's text", async () => {
+    const rows = await rowsOf();
+    const pick = (ref: string) => {
+      const r = rows.get(ref)!;
+      return {
+        mine: r.assignees.includes(ME),
+        maker: r.ownerRaw,
+        owner: r.details.Owner ?? null,
+        unknown: r.unknownOwners,
+      };
+    };
+    // Same person.
+    expect(pick("NOB-01")).toEqual({
+      mine: true,
+      maker: "Pragaman",
+      owner: "Pragaman",
+      unknown: [],
+    });
+    // Blank Maker: the Owner does it.
+    expect(pick("NOB-02")).toEqual({
+      mine: true,
+      maker: null,
+      owner: "Pragaman",
+      unknown: [],
+    });
+    // Different Owner and Maker: the Maker's.
+    expect(pick("NOB-03")).toEqual({
+      mine: true,
+      maker: "Pragaman",
+      owner: "Shlok",
+      unknown: [],
+    });
+    // Comma lists.
+    expect(pick("NOB-04")).toMatchObject({
+      mine: true,
+      maker: "Pragaman, Shlok",
+    });
+    expect(pick("NOB-06")).toMatchObject({ mine: true, owner: "Shlok" });
+    // Pragaman only checks it: Creative makes it.
+    expect(pick("NOB-08")).toEqual({
+      mine: false,
+      maker: "Creative",
+      owner: "Pragaman",
+      unknown: [],
+    });
+    // An Owner Knit does not know is never looked up while the Maker is filled.
+    expect(pick("NOB-10")).toEqual({
+      mine: true,
+      maker: "P",
+      owner: "Riya",
+      unknown: [],
     });
   });
 });

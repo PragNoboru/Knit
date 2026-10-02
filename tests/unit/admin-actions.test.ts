@@ -1051,6 +1051,35 @@ describe("Use the standard setup (11.1, N68, N69)", () => {
     });
   });
 
+  it("fills a v2 tab with Maker as the owner and Owner as the checking owner (N74)", async () => {
+    const V2 = "Knit_Standard_Tracker_v2_example";
+    const ref: TabRef = {
+      fileId: V2,
+      sheetId: (await source.listTabs(V2)).find((t) => t.title === "Tasks")!
+        .sheetId,
+    };
+    fx.tab = {
+      structure: await source.readStructure(ref, 1),
+      rows: await source.readRows(ref, 1),
+    };
+    // The button names the version it offers; v1's id is refused for a v2 row 1.
+    expect(await apply()).toEqual({
+      error:
+        "This tab no longer has the Knit Standard Tracker v1 columns in row 1. Set it up step by step.",
+    });
+    await expect(apply(TRACKER_ID, "knit-standard-v2")).rejects.toThrow(
+      /^redirect:\/admin\/trackers\/[0-9a-f-]+\/setup\/owners\?standard=applied$/,
+    );
+    const expected = TrackerConfig.parse(
+      registry.trackers.find((t) => t.name === "Knit Standard v2 · Example"),
+    );
+    expect(savedConfigs()[0]).toMatchObject({
+      columns: { ...expected.columns, owner: "Maker", checker: "Owner" },
+      detailColumns: expected.detailColumns,
+      goLiveChosen: true,
+    });
+  });
+
   it("opens Map statuses when a word is left, with no sheet word in the URL", async () => {
     const rows = stdRows.map((row, i) =>
       i === 0

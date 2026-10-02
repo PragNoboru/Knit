@@ -2,7 +2,10 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AdminTracker } from "@/lib/admin/data";
-import { KNIT_STANDARD_V1 } from "@/lib/domain/standard-template";
+import {
+  KNIT_STANDARD_V1,
+  KNIT_STANDARD_V2,
+} from "@/lib/domain/standard-template";
 import { columnLetter, type TabStructure } from "@/lib/sheets/types";
 
 // PRD 11 step 3, 11.1, N68: the header row step offers Use the standard setup on a draft whose
@@ -71,6 +74,14 @@ describe("Header row step: the standard setup (11.1)", () => {
     expect(html).toContain("This tab follows the Knit Standard Tracker v1.");
     expect(html).toContain("Use the standard setup");
     expect(html).toContain("Which row holds the column names?");
+  });
+
+  it("names the newest version row 1 matches: v2 for its 15 headers (N74)", async () => {
+    fx.structure = structure([...KNIT_STANDARD_V2.headers, "Budget"]);
+    const html = await render("draft");
+    expect(html).toContain("This tab follows the Knit Standard Tracker v2.");
+    expect(html).not.toContain("Knit Standard Tracker v1");
+    expect(html).toContain("Use the standard setup");
   });
 
   it("names a write target holding formulas, with no button", async () => {

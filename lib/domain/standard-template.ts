@@ -22,9 +22,13 @@ export interface StandardTemplate {
   blankStatus: UserStatus;
   /** The columns Knit writes, which may not hold formulas (N6). */
   writeTargets: readonly string[];
+  /** 6.7: the owner column, who does the task and is assigned it. */
+  ownerHeader: string;
+  /** N73: the checking owner column, or null when the version has none. */
+  checkerHeader: string | null;
 }
 
-/** 11.1: Knit Standard Tracker v1, the template every brand's tracker uses from Phase 2. */
+/** 11.1: Knit Standard Tracker v1, the template before v2 (N74); it never changes (N70). */
 export const KNIT_STANDARD_V1: StandardTemplate = {
   id: "knit-standard-v1",
   name: "Knit Standard Tracker v1",
@@ -53,10 +57,31 @@ export const KNIT_STANDARD_V1: StandardTemplate = {
   },
   blankStatus: "yet_to_start",
   writeTargets: ["Status", "Done on"],
+  ownerHeader: "Owner",
+  checkerHeader: null,
+};
+
+/**
+ * N74: Knit Standard Tracker v2, the template every brand's tracker is built from for Phase 2
+ * go-live on Mon 5 Oct 2026 (N71). v1 with a Maker column right after Owner: Maker is who does
+ * the task and is assigned it, Owner checks it (N72, N73). Everything else is v1's.
+ */
+export const KNIT_STANDARD_V2: StandardTemplate = {
+  ...KNIT_STANDARD_V1,
+  id: "knit-standard-v2",
+  name: "Knit Standard Tracker v2",
+  headers: [
+    ...KNIT_STANDARD_V1.headers.slice(0, 7),
+    "Maker",
+    ...KNIT_STANDARD_V1.headers.slice(7),
+  ],
+  ownerHeader: "Maker",
+  checkerHeader: "Owner",
 };
 
 /** Every template version, newest first: the wizard offers the newest one row 1 matches (N70). */
 export const STANDARD_TEMPLATES: readonly StandardTemplate[] = [
+  KNIT_STANDARD_V2,
   KNIT_STANDARD_V1,
 ];
 
@@ -256,7 +281,9 @@ export function standardSetupDraft(
       statusRead: h("Status"),
       statusWrite: h("Status"),
       completedOn: h("Done on"),
-      owner: h("Owner"),
+      // 6.7, N73: v1's owner is Owner; v2's is Maker, with Owner as the checking owner.
+      owner: h(template.ownerHeader),
+      checker: template.checkerHeader ? h(template.checkerHeader) : null,
       sourceRef: h("Task ID"),
       critical: { header: h("Priority"), truthy: ["High"] },
     },

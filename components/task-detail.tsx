@@ -24,8 +24,9 @@ const LONG_TEXT = 160;
 
 /**
  * PRD 12.6: title, subtitle, tracker chip, source ID, planned raw text and parsed dates, due
- * date, owner raw text (Owner and Maker with a checking owner column, N75), critical flag, detail columns, Open in sheet, then the task-days and
- * events. The admin sees Request correction on locked task-days; members see Report an issue.
+ * date, owner raw text (Owner and Maker with a checking owner column, N75), critical flag,
+ * detail columns, Open in sheet, then the task-days and events. The admin sees Request
+ * correction on locked task-days; members see Report an issue.
  */
 export function TaskDetailView({
   detail,

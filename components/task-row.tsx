@@ -17,9 +17,10 @@ import {
 import type { LocalDate } from "@/lib/time";
 
 /**
- * PRD 12.3 row: critical marker, title and subtitle (and the Owner line, N75), tracker chip, due date (and planned date),
- * status control, spill count, Open in sheet. Under 640 px it is a stacked card with the status
- * control full width (12.2); the tracker and due date get their own columns from 1024 px.
+ * PRD 12.3 row: critical marker, title and subtitle (and the Owner line, N75), tracker chip,
+ * due date (and planned date), status control, spill count, Open in sheet. Under 640 px it is
+ * a stacked card with the status control full width (12.2); the tracker and due date get their
+ * own columns from 1024 px.
  */
 
 export const ROW_GRID =

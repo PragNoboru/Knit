@@ -5,7 +5,8 @@
 // right: the cells, column widths, conditional formats, dropdown rules (their Lists ranges stay
 // Google's), the header notes, and the Summary formulas that read Tasks. It then types ten
 // example rows (NOB-01 to NOB-10) with Owner and Maker the same, different, blank Maker, and
-// comma lists, plus the brand column Budget, now P.
+// comma lists, plus the brand column Budget, now P. The Guide tab is brought to v2: the version,
+// 15 columns, Owner as who checks the task, and a Maker row in both of its column tables.
 //
 //   pnpm exec tsx scripts/make-standard-v2-fixture.ts
 //
@@ -23,6 +24,7 @@ const TASKS_XML = "xl/worksheets/sheet1.xml";
 const SUMMARY_XML = "xl/worksheets/sheet2.xml";
 const COMMENTS_XML = "xl/comments1.xml";
 const NOTES_VML = "xl/drawings/vmlDrawing1.vml";
+const GUIDE_XML = "xl/worksheets/sheet4.xml";
 
 /** Column H (0-based 7): Maker goes here, and v1's H onwards moves one right. */
 const MAKER = 7;
@@ -403,6 +405,100 @@ function noteShapes(vml: string): string {
   return out;
 }
 
+/** The Guide tab's cells that name v1, its 14 columns, or Owner as who does the task. */
+const GUIDE_TEXT: Record<string, string> = {
+  B1: "Knit Standard Tracker v2",
+  B2: "One tracker format for every brand: Filing Buddy, Noboru, Sapiens, Auxman and whatever comes next. Version 2, 2 Oct 2026: Maker added after Owner.",
+  B13: "1. Row 1 is the header row. Never add title rows above it, and never rename, reorder or delete the 15 standard columns.",
+  B14: "2. One task per row: one action, one date, one Owner who checks it, and a Maker when someone else does it (comma lists are fine).",
+  B24: "The 15 standard columns",
+  D32: "Who checks that it is done, from the Lists tab. Comma for several.",
+  B73: "2. Lists tab: fill Owner (the people list for Owner and Maker) and Workstream for the brand. Fill Stage only if it has a pipeline; otherwise clear it.",
+  B74: "3. Several people per task? In Google Sheets open Data > Data validation, pick the Owner and Maker rules and turn on 'Allow multiple selections'.",
+};
+/** Rows added after the Owner rows of the Guide's two tables (v1 rows 32 and 50). */
+const GUIDE_MAKER_ROWS: { after: number; text: Record<string, string> }[] = [
+  {
+    after: 32,
+    text: {
+      B: "Maker",
+      C: "Optional",
+      D: "Who does it, from the Lists tab. Blank when the Owner does it. Knit puts the task on the Maker's Today. Comma for several.",
+      E: "Shlok",
+    },
+  },
+  { after: 50, text: { B: "Maker", C: "(blank: the Owner does it)" } },
+];
+
+/** A cell's text, typed in place as an inline string; its style is kept. */
+function setCellText(xml: string, ref: string, text: string): string {
+  const cell = new RegExp(`<c r="${ref}"([^>]*?)(?:/>|>[\\s\\S]*?</c>)`);
+  const match = cell.exec(xml);
+  if (!match) throw new Error(`No Guide cell ${ref}`);
+  const style = /s="(\d+)"/.exec(match[1]!)?.[1];
+  return xml.replace(
+    cell,
+    `<c r="${ref}"${style ? ` s="${style}"` : ""} t="inlineStr"><is><t>${escapeXml(text)}</t></is></c>`,
+  );
+}
+
+/** Inserts a copy of row `after` below it, every later row (and merge) one row down. */
+function insertRowAfter(
+  xml: string,
+  after: number,
+  text: Record<string, string>,
+): string {
+  const down = (n: number) => (n > after ? n + 1 : n);
+  xml = xml.replace(
+    /<row r="(\d+)"([^>]*)>([\s\S]*?)<\/row>/g,
+    (_whole, row: string, attributes: string, body: string) => {
+      const n = down(Number(row));
+      const moved = body.replace(
+        /<c r="([A-Z]+)\d+"/g,
+        (_c, col: string) => `<c r="${col}${n}"`,
+      );
+      let out = `<row r="${n}"${attributes}>${moved}</row>`;
+      if (Number(row) === after) {
+        let copy = `<row r="${after + 1}"${attributes}>${body.replace(
+          /<c r="([A-Z]+)\d+"/g,
+          (_c, col: string) => `<c r="${col}${after + 1}"`,
+        )}</row>`;
+        // The copy's other cells are empty in both tables (or merged into C).
+        for (const [col, value] of Object.entries(text))
+          copy = setCellText(copy, `${col}${after + 1}`, value);
+        out += copy;
+      }
+      return out;
+    },
+  );
+  const merges: string[] = [];
+  xml = xml.replace(
+    /<mergeCell ref="([A-Z]+)(\d+):([A-Z]+)(\d+)"\/>/g,
+    (_m, c1: string, r1: string, c2: string, r2: string) => {
+      if (Number(r1) === after)
+        merges.push(`<mergeCell ref="${c1}${after + 1}:${c2}${after + 1}"/>`);
+      return `<mergeCell ref="${c1}${down(Number(r1))}:${c2}${down(Number(r2))}"/>`;
+    },
+  );
+  return xml
+    .replace("</mergeCells>", `${merges.join("")}</mergeCells>`)
+    .replace(
+      /<mergeCells count="\d+">/,
+      () =>
+        `<mergeCells count="${(xml.match(/<mergeCell ref=/g)?.length ?? 0) + merges.length}">`,
+    );
+}
+
+/** The Guide tab: names v2 and its 15 columns, Owner as who checks, and adds Maker rows. */
+function guideSheet(xml: string): string {
+  for (const [ref, text] of Object.entries(GUIDE_TEXT))
+    xml = setCellText(xml, ref, text);
+  // From the bottom up, so the second table's row number is still v1's.
+  for (const { after, text } of [...GUIDE_MAKER_ROWS].reverse())
+    xml = insertRowAfter(xml, after, text);
+  return xml;
+}
+
 function main() {
   const entries = readZip(readFileSync(IN));
   const edit = (name: string, change: (text: string) => string) => {
@@ -413,6 +509,7 @@ function main() {
   edit(SUMMARY_XML, summarySheet);
   edit(COMMENTS_XML, comments);
   edit(NOTES_VML, noteShapes);
+  edit(GUIDE_XML, guideSheet);
   const out = writeZip(entries);
   writeFileSync(OUT, out);
   console.log(`Wrote ${OUT} (${out.length} bytes)`);

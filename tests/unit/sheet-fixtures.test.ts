@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
+import * as XLSX from "xlsx";
 
 import { calendarDaysFromRules, calendarFromDays } from "@/lib/domain/calendar";
 import { normaliseKey, TrackerConfig } from "@/lib/domain/config";
@@ -284,5 +285,34 @@ describe("Owner and Maker in the v2 example (N72, N73)", () => {
       owner: "Riya",
       unknown: [],
     });
+  });
+
+  it("has a Guide tab in the v2 words, a model for the blank template (TRACKERS 7)", () => {
+    const book = XLSX.read(
+      readFileSync(
+        fileURLToPath(
+          new URL(
+            "../../fixtures/trackers/Knit_Standard_Tracker_v2_example.xlsx",
+            import.meta.url,
+          ),
+        ),
+      ),
+      { type: "buffer" },
+    );
+    const lines = XLSX.utils
+      .sheet_to_json<unknown[]>(book.Sheets.Guide!, { header: 1 })
+      .map((row) => row.filter((cell) => cell !== undefined).join(" | "));
+    const text = lines.join("\n");
+    expect(lines[0]).toBe("Knit Standard Tracker v2");
+    expect(text).toContain("Version 2, 2 Oct 2026");
+    expect(text).toContain("The 15 standard columns");
+    expect(text).not.toMatch(/v1|Version 1|14 standard/);
+    expect(text).not.toContain("Who does it, from the Lists tab. Comma");
+    // Both tables list Maker right after Owner.
+    const owner = lines.findIndex((l) => l.startsWith("Owner | Required"));
+    expect(lines[owner]).toContain("Who checks that it is done");
+    expect(lines[owner + 1]).toMatch(/^Maker \| Optional \| Who does it/);
+    const example = lines.findIndex((l) => l === "Owner | Pragaman");
+    expect(lines[example + 1]).toBe("Maker | (blank: the Owner does it)");
   });
 });

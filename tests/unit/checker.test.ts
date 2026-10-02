@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import { calendarDaysFromRules, calendarFromDays } from "@/lib/domain/calendar";
+import { ownerLine, TaskCard } from "@/lib/domain/cards";
 import { normaliseKey, TrackerConfig } from "@/lib/domain/config";
 import { aliasMap, assigneesFor } from "@/lib/domain/owners";
 import {
@@ -25,6 +26,7 @@ import {
   KNIT_NOTE_HEADER,
   type TabStructure,
 } from "@/lib/sheets/types";
+import { detailPairs, ownerFacts } from "@/lib/domain/tasks-screens";
 import { checkStructure, mappedHeaders } from "@/lib/sync/structure";
 
 // PRD 6.7, 8.2, N72, N73: the checking owner column. The owner column says who does the task
@@ -305,5 +307,94 @@ describe("the wizard's column rules (11 step 4, 12.8, N42, N73)", () => {
         columns: { ...columns, checker: "Maker" },
       }).map((p) => p.problem),
     ).toContain(CHECKER_SAME_AS_OWNER);
+  });
+});
+
+describe("showing the Owner (12.3, 12.6, N75)", () => {
+  const card = {
+    taskId: "00000000-0000-4000-8000-000000000001",
+    title: "Approve the launch budget",
+    subtitle: null,
+    critical: false,
+    dueDate: "2026-10-01",
+    plannedStart: "2026-10-01",
+    plannedEnd: null,
+    plannedRaw: "Thu 1 Oct 2026",
+    dateKind: "single",
+    taskStatus: "yet_to_start",
+    taskReason: null,
+    completedOn: null,
+    sourceRef: "FBG-03",
+    rowHint: 4,
+    historyOnly: false,
+    removed: false,
+    tracker: {
+      id: "00000000-0000-4000-8000-000000000002",
+      name: "Standard v2",
+      color: "teal",
+      fileId: "file",
+      gid: 0,
+    },
+    taskDay: null,
+    sync: null,
+    spillCount: 0,
+    editable: true,
+  };
+
+  it("reads a card from a database before the migration as having no checker", () => {
+    expect(TaskCard.parse(card).checker).toBe(null);
+    expect(ownerLine(TaskCard.parse(card))).toBe(null);
+  });
+
+  it('shows "Owner: {names}" only when the checker cell is filled', () => {
+    const parse = (raw: string | null) =>
+      TaskCard.parse({ ...card, checker: { header: "Owner", raw } });
+    expect(ownerLine(parse("Shlok"))).toBe("Owner: Shlok");
+    expect(ownerLine(parse("Pragaman, Shlok"))).toBe("Owner: Pragaman, Shlok");
+    expect(ownerLine(parse(null))).toBe(null);
+  });
+
+  it("lists Owner and Maker in the drawer with a checker, else the one Owner line", () => {
+    const checker = (raw: string | null) => ({
+      card: { checker: { header: "Owner", raw } },
+    });
+    expect(ownerFacts({ ...checker("Shlok"), ownerRaw: "Pragaman" })).toEqual([
+      { label: "Owner", value: "Shlok" },
+      { label: "Maker", value: "Pragaman" },
+    ]);
+    // A blank Maker: the Owner is the maker (N72).
+    expect(ownerFacts({ ...checker("Pragaman"), ownerRaw: null })).toEqual([
+      { label: "Owner", value: "Pragaman" },
+      { label: "Maker", value: "Pragaman" },
+    ]);
+    expect(ownerFacts({ ...checker(null), ownerRaw: "Riya" })).toEqual([
+      { label: "Owner", value: "None" },
+      { label: "Maker", value: "Riya" },
+    ]);
+    expect(
+      ownerFacts({ card: { checker: null }, ownerRaw: "P + Agent" }),
+    ).toEqual([{ label: "Owner", value: "P + Agent" }]);
+    expect(ownerFacts({ card: { checker: null }, ownerRaw: null })).toEqual([
+      { label: "Owner", value: "None" },
+    ]);
+  });
+
+  it("leaves the checker's text out of the drawer's details", () => {
+    const detail = {
+      details: { Workstream: "Admin", Owner: "Shlok", Notes: "Soon" },
+      detailOrder: ["Workstream", "Notes"],
+    };
+    expect(
+      detailPairs({
+        ...detail,
+        card: { checker: { header: "Owner", raw: "Shlok" } },
+      }),
+    ).toEqual([
+      { label: "Workstream", value: "Admin" },
+      { label: "Notes", value: "Soon" },
+    ]);
+    // Without a checker column, every detail is listed as before.
+    expect(detailPairs({ ...detail, card: { checker: null } })).toHaveLength(3);
+    expect(detailPairs(detail)).toHaveLength(3);
   });
 });

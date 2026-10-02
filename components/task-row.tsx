@@ -7,6 +7,7 @@ import {
   canChange,
   doneEarlyLabel,
   dueLabel,
+  ownerLine,
   rowReason,
   rowStatus,
   sheetRowUrl,
@@ -16,7 +17,7 @@ import {
 import type { LocalDate } from "@/lib/time";
 
 /**
- * PRD 12.3 row: critical marker, title and subtitle, tracker chip, due date (and planned date),
+ * PRD 12.3 row: critical marker, title and subtitle (and the Owner line, N75), tracker chip, due date (and planned date),
  * status control, spill count, Open in sheet. Under 640 px it is a stacked card with the status
  * control full width (12.2); the tracker and due date get their own columns from 1024 px.
  */
@@ -57,6 +58,7 @@ export function TaskRow({
   const due = dueLabel(card);
   const spill = spillBadge(card);
   const doneEarly = doneEarlyLabel(card);
+  const owner = ownerLine(card);
   const reason =
     status === "blocked" || status === "cancelled" ? rowReason(card) : null;
   const chip = (
@@ -108,6 +110,10 @@ export function TaskRow({
           <p className="text-xs break-words text-muted-foreground">
             {card.subtitle}
           </p>
+        ) : null}
+        {/* N75: the Owner who checks the task. */}
+        {owner ? (
+          <p className="text-xs break-words text-muted-foreground">{owner}</p>
         ) : null}
         <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
           <span className="lg:hidden">{chip}</span>

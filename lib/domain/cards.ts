@@ -68,6 +68,15 @@ export const TaskCard = z.object({
     fileId: z.string(),
     gid: z.number().int(),
   }),
+  /**
+   * N73, N75: the checking owner (the Owner of N72). Null when the tracker maps no checking
+   * owner column; `raw` is null when the task's cell is blank. Absent from cards of a database
+   * before 20261002100000_task_card_checker, which read as null.
+   */
+  checker: z
+    .object({ header: z.string(), raw: z.string().nullable() })
+    .nullable()
+    .default(null),
   taskDay: TaskDayInfo.nullable(),
   sync: SyncState,
   spillCount: z.number().int().min(0),
@@ -94,6 +103,15 @@ export function canChange(card: TaskCard, today: LocalDate): boolean {
   if (card.removed || card.historyOnly) return false;
   if (card.taskDay) return !card.taskDay.locked && card.taskDay.day >= today;
   return card.editable;
+}
+
+/**
+ * N75: "Owner: {names}" on a task's row, when its tracker maps a checking owner column and the
+ * task's cell is filled; null otherwise.
+ */
+export function ownerLine(card: Pick<TaskCard, "checker">): string | null {
+  const raw = card.checker?.raw;
+  return raw ? `Owner: ${raw}` : null;
 }
 
 /** PRD 12.3: the link to the task's row in its sheet. */

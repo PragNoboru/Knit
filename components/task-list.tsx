@@ -3,7 +3,7 @@ import Link from "next/link";
 
 import { StatusControl } from "@/components/status-control";
 import { TrackerChip } from "@/components/tracker-chip";
-import { canChange, type TaskCard } from "@/lib/domain/cards";
+import { canChange, ownerLine, type TaskCard } from "@/lib/domain/cards";
 import { formatDay, type LocalDate } from "@/lib/time";
 
 const GRID =
@@ -69,6 +69,12 @@ export function TaskList({
               {card.subtitle ? (
                 <p className="text-xs break-words text-muted-foreground">
                   {card.subtitle}
+                </p>
+              ) : null}
+              {/* N75: the Owner who checks the task. */}
+              {ownerLine(card) ? (
+                <p className="text-xs break-words text-muted-foreground">
+                  {ownerLine(card)}
                 </p>
               ) : null}
             </div>

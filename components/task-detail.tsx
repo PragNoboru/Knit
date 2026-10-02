@@ -15,6 +15,7 @@ import { dueLabel, sheetRowUrl } from "@/lib/domain/cards";
 import {
   describeEvent,
   detailPairs,
+  ownerFacts,
   type TaskDetail,
 } from "@/lib/domain/tasks-screens";
 import { formatDay, istDateTime, type LocalDate } from "@/lib/time";
@@ -23,7 +24,7 @@ const LONG_TEXT = 160;
 
 /**
  * PRD 12.6: title, subtitle, tracker chip, source ID, planned raw text and parsed dates, due
- * date, owner raw text, critical flag, detail columns, Open in sheet, then the task-days and
+ * date, owner raw text (Owner and Maker with a checking owner column, N75), critical flag, detail columns, Open in sheet, then the task-days and
  * events. The admin sees Request correction on locked task-days; members see Report an issue.
  */
 export function TaskDetailView({
@@ -59,7 +60,8 @@ export function TaskDetailView({
     ...(card.completedOn
       ? [{ label: "Completed on", value: formatDay(card.completedOn) }]
       : []),
-    { label: "Owner", value: detail.ownerRaw || "None" },
+    // N75: Owner, or Owner and Maker when the tracker maps a checking owner column.
+    ...ownerFacts(detail),
     ...(card.critical
       ? [
           {

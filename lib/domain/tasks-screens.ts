@@ -74,14 +74,37 @@ export const TaskDetail = z.object({
 });
 export type TaskDetail = z.infer<typeof TaskDetail>;
 
-/** 12.6: detail columns as label and value pairs, in the tracker's order. */
+/**
+ * 12.6, N75: who the task belongs to, as the drawer lists it. Without a checking owner column,
+ * the owner cell as "Owner". With one, "Owner" is the checker cell and "Maker" the owner cell,
+ * or the checker cell when the owner cell is blank (N72: the Owner is then the maker).
+ */
+export function ownerFacts(
+  detail: Pick<TaskDetail, "ownerRaw"> & { card: Pick<TaskCard, "checker"> },
+): { label: string; value: string }[] {
+  const checker = detail.card.checker;
+  if (!checker) return [{ label: "Owner", value: detail.ownerRaw || "None" }];
+  return [
+    { label: "Owner", value: checker.raw || "None" },
+    { label: "Maker", value: detail.ownerRaw || checker.raw || "None" },
+  ];
+}
+
+/**
+ * 12.6: detail columns as label and value pairs, in the tracker's order. N73: the checking
+ * owner's text, kept with the details, is left out: the drawer shows it as the Owner.
+ */
 export function detailPairs(
-  detail: Pick<TaskDetail, "details" | "detailOrder">,
+  detail: Pick<TaskDetail, "details" | "detailOrder"> & {
+    card?: Pick<TaskCard, "checker">;
+  },
 ): { label: string; value: string }[] {
   const byKey = new Map(
     Object.entries(detail.details).map(([k, v]) => [k.toLowerCase(), v]),
   );
   const seen = new Set<string>();
+  const checker = detail.card?.checker?.header.toLowerCase();
+  if (checker !== undefined) seen.add(checker);
   const pairs: { label: string; value: string }[] = [];
   for (const label of detail.detailOrder) {
     const key = label.toLowerCase();

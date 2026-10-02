@@ -50,8 +50,9 @@ test("the standard setup connects a v2 tab: the Maker gets the task, the Owner s
   });
   await offer.getByRole("button", { name: "Use the standard setup" }).click();
 
-  // Step 6: every name is known. Owners are looked up only where Maker is blank, so the
-  // Owner Riya on a row with a Maker raises nothing (N73).
+  // Step 6: every name is known. (Riya, NOB-10's Owner beside a filled Maker, was already
+  // marked a non-user by f-standard-setup, so this does not show that such an Owner is never
+  // looked up: the unit and fixture tests cover that rule, N73.)
   await expect(page).toHaveURL(/\/setup\/owners\?standard=applied$/);
   await expect(
     page.getByText(
@@ -90,6 +91,28 @@ test("the standard setup connects a v2 tab: the Maker gets the task, the Owner s
   await expect(count(page, "Date ranges")).toHaveText("4");
   await expect(count(page, "Before go-live (history only)")).toHaveText("2");
   await expect(count(page, "Unmapped statuses")).toHaveText("None");
+  // The preview names Owner and Maker as the drawer does (N75): NOB-03's Maker is not shown
+  // as its Owner, and NOB-05's blank Maker shows its Owner, who is assigned it.
+  const preview = page
+    .getByRole("region", { name: "First 20 tasks" })
+    .getByRole("table");
+  await expect(preview.getByRole("columnheader")).toHaveText([
+    "Due",
+    "Title",
+    "Status",
+    "Owner",
+    "Maker",
+  ]);
+  const previewRow = (title: string) =>
+    preview.getByRole("row").filter({ hasText: title }).getByRole("cell");
+  await expect(previewRow("Sign off the launch budget").nth(3)).toHaveText(
+    "Shlok",
+  );
+  await expect(previewRow("Sign off the launch budget").nth(4)).toHaveText(
+    "Pragaman",
+  );
+  await expect(previewRow("Draft the ad copy").nth(3)).toHaveText("Pragaman");
+  await expect(previewRow("Draft the ad copy").nth(4)).toHaveText("Pragaman");
   await page.getByRole("link", { name: "Continue to activation" }).click();
 
   // Step 9: activate; NOB-02 (blank Maker, so its Owner's) is the open row before go-live.

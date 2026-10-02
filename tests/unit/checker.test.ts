@@ -14,9 +14,12 @@ import {
   type SheetRow,
 } from "@/lib/domain/rows";
 import {
+  CHECKER_NEEDS_OWNER,
   CHECKER_SAME_AS_OWNER,
   draftProblems,
   finalConfig,
+  previewPeople,
+  previewPeopleHeads,
   writeTargetProblem,
   type DraftConfig,
 } from "@/lib/domain/wizard";
@@ -213,6 +216,36 @@ describe("normaliseRow with a checking owner column (10.2 step 5, N73)", () => {
     ).toEqual({ Workstream: "Admin" });
   });
 
+  it("keeps an owner cell that names nobody as blank, so the drawer's Maker is who is assigned", () => {
+    // Review of N73, N75: "," names nobody, so the Owner is assigned and is shown as Maker.
+    for (const maker of [",", " , ", ", ,"]) {
+      const normalised = normaliseRow(
+        row({ ...base, Owner: "Pragaman", Maker: maker }),
+        ctx(withChecker),
+      );
+      expect(normalised.assignees, maker).toEqual([PRAGAMAN]);
+      expect(normalised.ownerRaw, maker).toBe(null);
+      expect(
+        ownerFacts({
+          ownerRaw: normalised.ownerRaw,
+          card: {
+            checker: { header: "Owner", raw: normalised.details.Owner! },
+          },
+        }),
+      ).toEqual([
+        { label: "Owner", value: "Pragaman" },
+        { label: "Maker", value: "Pragaman" },
+      ]);
+    }
+    // Without a checker column the owner cell's text is kept as it was.
+    expect(normaliseRow(row({ ...base, Owner: "," }), ctx(v1)).ownerRaw).toBe(
+      ",",
+    );
+    expect(
+      normaliseRow(row({ ...base, Owner: "P + Agent" }), ctx(v1)).ownerRaw,
+    ).toBe("P + Agent");
+  });
+
   it("counts the checker as content (10.2 step 3, N51)", () => {
     expect(contentHeaders(withChecker)).toContain("Owner");
     expect(contentHeaders(v1)).not.toContain("Maker");
@@ -307,6 +340,67 @@ describe("the wizard's column rules (11 step 4, 12.8, N42, N73)", () => {
         columns: { ...columns, checker: "Maker" },
       }).map((p) => p.problem),
     ).toContain(CHECKER_SAME_AS_OWNER);
+  });
+});
+
+describe("a checking owner needs an owner column (11 step 4, 12.8, N73)", () => {
+  const columns = withChecker.columns;
+
+  it("refuses a checker with No owner column, at step 4 and at activation", () => {
+    expect(writeTargetProblem({ ...columns, owner: null }, "{Task}")).toBe(
+      CHECKER_NEEDS_OWNER,
+    );
+    expect(CHECKER_NEEDS_OWNER).toBe(
+      "Choose the Who does the task column to use a checking owner.",
+    );
+    expect(
+      draftProblems({
+        ...withChecker,
+        columns: { ...columns, owner: null },
+      }),
+    ).toContainEqual({ step: "columns", problem: CHECKER_NEEDS_OWNER });
+  });
+
+  it("keeps No owner column without a checker, as before", () => {
+    expect(
+      writeTargetProblem({ ...columns, owner: null, checker: null }, "{Task}"),
+    ).toBe(null);
+    expect(writeTargetProblem({ ...v1.columns, owner: null }, "{Task}")).toBe(
+      null,
+    );
+  });
+});
+
+describe("the wizard preview's people columns (11 step 8, N75)", () => {
+  it("shows the owner cell as Owner without a checker, as before", () => {
+    expect(previewPeopleHeads(null)).toEqual(["Owner"]);
+    expect(previewPeople({ ownerRaw: "P + Agent", details: {} }, null)).toEqual(
+      ["P + Agent"],
+    );
+    expect(previewPeople({ ownerRaw: null, details: {} }, null)).toEqual([""]);
+  });
+
+  it("shows Owner and Maker as the drawer does with a checker", () => {
+    expect(previewPeopleHeads("Owner")).toEqual(["Owner", "Maker"]);
+    const preview = (owner: string, maker: string) => {
+      const normalised = normaliseRow(
+        row({
+          Date: "1 Oct 2026",
+          Task: "Sign off the launch budget",
+          Status: "Not started",
+          Owner: owner,
+          Maker: maker,
+        }),
+        ctx(withChecker),
+      );
+      return previewPeople(normalised, "Owner");
+    };
+    // NOB-03: the Maker's name is never shown as the Owner.
+    expect(preview("Shlok", "Pragaman")).toEqual(["Shlok", "Pragaman"]);
+    // A blank Maker: the Owner does it, and is who it is assigned to.
+    expect(preview("Pragaman", "")).toEqual(["Pragaman", "Pragaman"]);
+    expect(preview("Pragaman", ",")).toEqual(["Pragaman", "Pragaman"]);
+    expect(preview("", "Pragaman, Shlok")).toEqual(["None", "Pragaman, Shlok"]);
   });
 });
 

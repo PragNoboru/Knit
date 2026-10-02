@@ -34,6 +34,7 @@ import {
   type NormalisedRow,
   type SheetRow,
 } from "./rows";
+import { ownerFacts } from "./tasks-screens";
 import { templateHeaders } from "./templates";
 
 /**
@@ -205,6 +206,9 @@ export const CHECKER_HINT =
   "Who checks that the task is done, shown on the task as Owner. When a row's Who does the task cell is blank, the task goes to the people named here.";
 export const CHECKER_SAME_AS_OWNER =
   "Who does the task and the checking owner must be different columns.";
+/** N73: without an owner column every task goes to the tracker owner, so a checker decides nothing. */
+export const CHECKER_NEEDS_OWNER =
+  "Choose the Who does the task column to use a checking owner.";
 
 export const endDateWarning = (rate: DateParseRate) =>
   `Only ${Math.round(rate.rate * 100)}% of the filled End dates can be read with their Date. Knit cannot read: ${rate.failing.join(", ")}.`;
@@ -328,6 +332,7 @@ export function writeTargetProblem(
     Boolean(a) && Boolean(b) && normaliseKey(a!) === normaliseKey(b!);
   if (same(columns.date, columns.endDate)) return END_DATE_SAME_AS_DATE;
   if (same(columns.owner, columns.checker)) return CHECKER_SAME_AS_OWNER;
+  if (columns.checker && !columns.owner) return CHECKER_NEEDS_OWNER;
   for (const target of [columns.statusWrite, columns.completedOn]) {
     if (!target) continue;
     const role = roles.find(([header]) => same(header, target));
@@ -461,6 +466,25 @@ export interface PreviewStats {
   invalidDates: number;
   unmappedStatuses: string[];
   historyOnly: number;
+}
+
+/**
+ * 11 step 8, N75: the people columns of the preview. Without a checking owner column, the owner
+ * cell as "Owner", as before. With one, "Owner" and "Maker" as the drawer shows them.
+ */
+export function previewPeopleHeads(checker: string | null): string[] {
+  return checker === null ? ["Owner"] : ["Owner", "Maker"];
+}
+
+export function previewPeople(
+  row: Pick<NormalisedRow, "ownerRaw" | "details">,
+  checker: string | null,
+): string[] {
+  if (checker === null) return [row.ownerRaw ?? ""];
+  return ownerFacts({
+    ownerRaw: row.ownerRaw,
+    card: { checker: { header: checker, raw: row.details[checker] ?? null } },
+  }).map((fact) => fact.value);
 }
 
 /** 11 step 8: the counts shown before anything is written. */

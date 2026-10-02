@@ -4,7 +4,12 @@ import { Section, Table } from "@/components/admin/fields";
 import { StatusBadge } from "@/components/status-badge";
 import { buttonVariants } from "@/components/ui/button";
 import { loadNormalisedRows, type AdminTracker } from "@/lib/admin/data";
-import { GO_LIVE_NEEDS_A_DATE, previewStats } from "@/lib/domain/wizard";
+import {
+  GO_LIVE_NEEDS_A_DATE,
+  previewPeople,
+  previewPeopleHeads,
+  previewStats,
+} from "@/lib/domain/wizard";
 import { formatDay } from "@/lib/time";
 
 // PRD 11 step 8: the first 20 tasks as Today would show them, and the counts. Nothing is written.
@@ -18,6 +23,8 @@ export async function PreviewStep({ tracker }: { tracker: AdminTracker }) {
       </p>
     );
   const { goLive } = normalised;
+  // N75: with a checking owner column, Owner and Maker as the drawer shows them.
+  const checker = normalised.config.columns.checker;
   if (goLive === null) return <p className="text-sm">{GO_LIVE_NEEDS_A_DATE}</p>;
   const stats = previewStats(normalised.rows, goLive);
   const upcoming = normalised.rows
@@ -58,7 +65,9 @@ export async function PreviewStep({ tracker }: { tracker: AdminTracker }) {
         </dl>
       </Section>
       <Section title="First 20 tasks">
-        <Table head={["Due", "Title", "Status", "Owner"]}>
+        <Table
+          head={["Due", "Title", "Status", ...previewPeopleHeads(checker)]}
+        >
           {upcoming.map((row) => (
             <tr key={row.rowNumber}>
               <td className="whitespace-nowrap">
@@ -75,7 +84,11 @@ export async function PreviewStep({ tracker }: { tracker: AdminTracker }) {
               <td>
                 <StatusBadge status={row.status.status} />
               </td>
-              <td className="text-muted-foreground">{row.ownerRaw ?? ""}</td>
+              {previewPeople(row, checker).map((value, i) => (
+                <td key={i} className="text-muted-foreground">
+                  {value}
+                </td>
+              ))}
             </tr>
           ))}
         </Table>

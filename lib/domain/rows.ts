@@ -12,7 +12,7 @@ import {
   type ParsedDate,
 } from "./dates";
 import { dueDateFor, plannedDueSource } from "./due-date";
-import { assigneesFor, type AliasMap } from "./owners";
+import { assigneesFor, splitOwners, type AliasMap } from "./owners";
 import { mapSourceStatus, type SourceStatus } from "./status";
 import { renderTemplate, templateHeaders } from "./templates";
 
@@ -157,8 +157,17 @@ export function normaliseRow(row: SheetRow, ctx: RowContext): NormalisedRow {
   const planned = plannedDueSource(date);
 
   const checkerRaw = columns.checker ? text(columns.checker) : "";
+  const ownerText = columns.owner ? text(columns.owner) : "";
+  // N73: with a checking owner column, an owner cell that names nobody ("", ",") is blank and
+  // kept as blank, so the drawer's Maker (N75) follows the same rule as the assignment.
+  const ownerRaw =
+    ownerText === "" ||
+    (columns.checker &&
+      splitOwners(ownerText, config.ownerSeparators).length === 0)
+      ? null
+      : ownerText;
   const owners = assigneesFor(
-    columns.owner ? text(columns.owner) : null,
+    columns.owner ? ownerText : null,
     config,
     aliases,
     ctx.trackerOwnerId,
@@ -196,7 +205,7 @@ export function normaliseRow(row: SheetRow, ctx: RowContext): NormalisedRow {
     critical: columns.critical
       ? truthy.has(normaliseKey(text(columns.critical.header)))
       : false,
-    ownerRaw: columns.owner ? text(columns.owner) || null : null,
+    ownerRaw,
     assignees: owners.userIds,
     unknownOwners: owners.unknown,
     plannedRaw: plannedRawOf(row, config),

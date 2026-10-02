@@ -70,7 +70,7 @@ test("the wizard connects a new sheet end to end", async ({ page }, info) => {
     .getByRole("combobox", { name: "Status (write)" })
     .selectOption("Done");
   await page
-    .getByRole("combobox", { name: "Owner", exact: true })
+    .getByRole("combobox", { name: "Who does the task", exact: true })
     .selectOption("Owner");
   await page
     .getByRole("combobox", { name: "Critical flag" })

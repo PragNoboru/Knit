@@ -178,7 +178,8 @@ export function normaliseRow(row: SheetRow, ctx: RowContext): NormalisedRow {
   }
   // N73: the checking owner's text is kept with the details, under its header, so it is read
   // and saved like the other content fields (10.3) and the screens can show it (N75).
-  if (columns.checker && checkerRaw !== "") details[columns.checker] = checkerRaw;
+  if (columns.checker && checkerRaw !== "")
+    details[columns.checker] = checkerRaw;
 
   const truthy = new Set((columns.critical?.truthy ?? []).map(normaliseKey));
   const subtitle = config.subtitleTemplate

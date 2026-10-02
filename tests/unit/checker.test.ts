@@ -38,9 +38,7 @@ const read = <T>(name: string): T =>
       "utf8",
     ),
   ) as T;
-const registry = read<{ trackers: { name: string }[] }>(
-  "trackers.config.json",
-);
+const registry = read<{ trackers: { name: string }[] }>("trackers.config.json");
 const holidays = read<{ holidays: { date: string; name: string }[] }>(
   "holidays.json",
 ).holidays;
@@ -274,8 +272,7 @@ describe("the structure check (10.2 step 2, N73)", () => {
       detail: { header: "Owner" },
     });
     expect(
-      checkStructure(structure([...V2, "Owner", ...knit]), withChecker)
-        ?.reason,
+      checkStructure(structure([...V2, "Owner", ...knit]), withChecker)?.reason,
     ).toBe("column 'Owner' appears more than once");
   });
 });
@@ -296,9 +293,9 @@ describe("the wizard's column rules (11 step 4, 12.8, N42, N73)", () => {
   });
 
   it("refuses the owner column as the checker", () => {
-    expect(
-      writeTargetProblem({ ...columns, checker: "maker" }, "{Task}"),
-    ).toBe(CHECKER_SAME_AS_OWNER);
+    expect(writeTargetProblem({ ...columns, checker: "maker" }, "{Task}")).toBe(
+      CHECKER_SAME_AS_OWNER,
+    );
     expect(CHECKER_SAME_AS_OWNER).toBe(
       "Who does the task and the checking owner must be different columns.",
     );

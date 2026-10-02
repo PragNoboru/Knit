@@ -102,7 +102,9 @@ describe("MemorySheetSource (PRD 7.5)", () => {
     expect(await source.getFileModifiedTime(ref.fileId)).not.toBe(before);
   });
 
-  it("keeps the example trackers read-only", async () => {
+  // Listing loads every example workbook (the two standard-layout ones are about 280 KB each),
+  // which can take longer than the 5 s default on a busy machine.
+  it("keeps the example trackers read-only", { timeout: 20_000 }, async () => {
     const fixtures = new XlsxFixtureSource("fixtures/trackers");
     const [file] = await fixtures.listFolder();
     await expect(

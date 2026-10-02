@@ -112,7 +112,10 @@ test("the standard setup connects a tab in the standard layout", async ({
     .getByRole("combobox", { name: "Action", exact: true })
     .selectOption("mark_done");
   await page.getByRole("button", { name: "Apply to selected" }).click();
-  await expect(page.getByText(/^1 task updated\.$/)).toBeVisible();
+  // It was the only open old row, so the review is now empty (6.11) and the form is gone.
+  await expect(
+    page.getByRole("region", { name: "Nothing to review" }),
+  ).toBeVisible();
 
   // All Tasks shows the Date and End date window (12.5).
   await page.goto("/tasks?q=search%20campaigns");

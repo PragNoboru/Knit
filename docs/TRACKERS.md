@@ -1,6 +1,6 @@
 # Knit: The example trackers
 
-Four files in `fixtures/trackers/` are real examples supplied by Pragaman on 25 Sep 2026, for reference and testing only. A fifth, `Knit_Standard_Tracker_v1_example.xlsx`, is an example in the Knit Standard Tracker v1 layout (section 6): Pragaman's blank template with ten made-up rows, not a real tracker. Live trackers will be Google Sheets in the Knit folder. Each file has a ready-made registry config in `fixtures/trackers.config.json`, including the numbers the fixture tests must reproduce.
+Four files in `fixtures/trackers/` are real examples supplied by Pragaman on 25 Sep 2026, for reference and testing only. A fifth, `Knit_Standard_Tracker_v1_example.xlsx`, is an example in the Knit Standard Tracker v1 layout (section 6): Pragaman's blank template with ten made-up rows, not a real tracker. A sixth, `Knit_Standard_Tracker_v2_example.xlsx`, is the same in the v2 layout (section 7), with Owner and Maker. Live trackers will be Google Sheets in the Knit folder. Each file has a ready-made registry config in `fixtures/trackers.config.json`, including the numbers the fixture tests must reproduce.
 
 The point of this document: the four trackers differ in ways that break naive sync. Every difference below is handled by configuration, not by tracker-specific code.
 
@@ -71,8 +71,8 @@ Same columns and quirks as Google Ads. Differences:
 ## 5. Auxman (arriving 2 or 3 Oct 2026)
 Not yet seen. It is connected through the wizard in Phase 2. If it is one task per row with a date column, no code is needed. If it is a grid with dates across columns, that is a change request (SOW assumption 2).
 
-## 6. Knit Standard Tracker v1 (from Phase 2 go-live, 13 Oct 2026)
-From Phase 2 go-live every brand's tracker is a copy of Pragaman's blank template, the Knit Standard Tracker v1, made from the blank template and never from another live tracker (its hidden Knit IDs would come along). The wizard sets it up in one go with **Use the standard setup** (PRD 11.1, N68 to N70).
+## 6. Knit Standard Tracker v1
+The first standard template (PRD 11.1, N68 to N70). From Phase 2 go-live on Mon 5 Oct 2026 new trackers are built from v2 instead (section 7, PRD N71, N74); v1 stays as it is, and Knit still sets up a tab made from it with **Use the standard setup**.
 
 **Tabs:** Tasks (the only tab Knit reads), Summary (counts by formula), Lists (the dropdown options), Guide (the rules, for people).
 
@@ -103,9 +103,57 @@ From Phase 2 go-live every brand's tracker is a copy of Pragaman's blank templat
 
 **The example file** (`Knit_Standard_Tracker_v1_example.xlsx`, tab Tasks, a brand column `Budget` after Notes): ten rows FBG-01 to FBG-10 with real dates from 28 Sep to 30 Nov 2026, using all five status words and one blank status. Expected with today 25 Sep 2026: 10 rows, 9 for Pragaman (FBG-08 belongs to Creative; FBG-06 also names Riya, who is not a Knit user), 6 single dates and 4 Date and End date windows, 2 rows on off days (FBG-06 ends Sun 18 Oct and is due Sat 17 Oct, a 3rd Saturday; FBG-07 ends Tue 20 Oct, Dussehra, and is due Mon 19 Oct), no formula columns, no unmapped statuses. It is made by `scripts/make-standard-fixture.ts` (dev only) from an .xlsx export of the blank template.
 
+## 7. Knit Standard Tracker v2 (from Phase 2 go-live, Mon 5 Oct 2026)
+Every brand's tracker for Phase 2 is built fresh from the blank Knit Standard Tracker v2, with its schedule starting on Mon 5 Oct 2026, and put in the Knit folder (PRD N71). Make each one from the blank template, never from another live tracker (its hidden Knit IDs would come along). The wizard sets it up in one go with **Use the standard setup**; its step 3 heading says "This tab follows the Knit Standard Tracker v2." (PRD 11.1, N74).
+
+v2 is v1 with one more column, **Maker**, right after Owner (PRD N72):
+- **Owner** is the person responsible for checking that the task is done.
+- **Maker** is the person who does it. Knit assigns the task to the Maker: it reaches the Maker's Today, and the Maker marks it done.
+- They can be the same person or different. Either can name several people, separated by commas ("Pragaman, Shlok").
+- A blank Maker means the Owner does it: the task reaches the Owner's Today.
+- Knit shows the Owner on the task ("Owner: Shlok") and lists Owner and Maker in the task drawer. An Owner check step (confirm or send back) comes in a later version (PRD section 22).
+
+**The format: tab Tasks, row 1, columns A to O, in this order, spelt exactly so**
+
+| Col | Header | Needed? | What goes in it |
+| --- | --- | --- | --- |
+| A | Task ID | Recommended | A short ID, unique in the tracker, with a brand prefix: FBG-01, NOB-014, SAP-REEL-01. Never reuse one |
+| B | Date | Required | A real date cell (type 05/10/2026): the day the task is due, or the first day of a multi-day task |
+| C | End date | Optional | A real date cell, only for a multi-day task: its last day, on or after Date. Blank for a one-day task |
+| D | Task | Required | One clear action, starting with a verb: "Publish the staged pages" |
+| E | Details / done when | Optional | What done looks like, specs, context |
+| F | Workstream | Recommended | The type of work, from the Lists tab (Ads, Design, SEO...) |
+| G | Owner | Required | Who checks that it is done. Several people separated by commas |
+| H | Maker | Optional | Who does it. Blank when the Owner does it; several people separated by commas |
+| I | Priority | Recommended | High, Normal or Low. High marks the task critical in Knit |
+| J | Status | Required | One of five words: Not started, In progress, Blocked, Done, Cancelled (a blank cell reads as Not started) |
+| K | Stage | Optional | A pipeline step for brands that need one (Copy ready, Scheduled...). Pipeline steps never go in Status |
+| L | Done on | Recommended | A real date: the day it was finished. Knit fills it when the task is marked done in Knit |
+| M | Depends on | Optional | Task IDs it waits for, comma separated |
+| N | Link | Optional | One link to the asset or doc |
+| O | Notes | Optional | Anything else; say why when Blocked or Cancelled |
+
+**Rules for moving tasks into it**
+- One header row (row 1) and one task per row; no merged cells, and no rows used as section titles.
+- Keep the 15 headers exactly as they are: never rename, delete, double or reorder one, and never insert a column between them. Brand columns go only after Notes (P onwards). Knit adds Knit Note and a hidden Knit ID after them when the tracker is activated.
+- Dates are real date cells, never text such as "TBD" or "1-6 Oct". A multi-day task uses End date. Ongoing work gets an End date too: the day it is reviewed.
+- Status uses only the five words of its dropdown. A word outside them is an unmapped status in Knit.
+- Spell each person's name the same way every time in Owner and Maker (Knit links each spelling to a person once). Names of people without a Knit login are fine: Knit asks once whether each is a user.
+- A task that is no longer needed is set to Cancelled with the reason in Notes, never deleted.
+- Rows planned before go-live are history only in Knit; open ones can be brought forward in the backlog review.
+
+**How the standard setup maps it:** as v1 (section 6), except that Maker is the owner column, who the task is assigned to (comma separated), and Owner is the checking owner column, shown on the task (PRD N73, N74). The detail columns are v1's, so Owner and Maker are not repeated under Details.
+
+**Quirks**
+- The preset maps all 15 headers, so renaming, deleting or doubling any of them pauses the tracker until restored.
+- An Owner whom Knit does not know is reported in Needs Attention only on rows whose Maker is blank, since only then does Knit assign by it (PRD N73).
+- The Status dropdown reads `Lists!$A$2:$A$6`, now in column J.
+
+**The example file** (`Knit_Standard_Tracker_v2_example.xlsx`, tab Tasks, the brand column `Budget` in P): ten rows NOB-01 to NOB-10 on the same dates as the v1 example, with Owner and Maker the same (NOB-01, NOB-07), a blank Maker (NOB-02, NOB-05, NOB-09), different (NOB-03: Owner Shlok, Maker Pragaman), comma lists (NOB-04, NOB-06), a row Pragaman only checks (NOB-08, made by Creative) and an Owner Knit does not know beside a filled Maker (NOB-10: Owner Riya, Maker P). Expected with today 25 Sep 2026: 10 rows, 9 for Pragaman (NOB-08 is Creative's), 6 single dates and 4 windows, 2 rows on off days, no formula columns, no unmapped statuses. It is made by `scripts/make-standard-v2-fixture.ts` (dev only) from the v1 example: it inserts the Maker column and moves everything after it, keeping the Lists tab and dropdown rules as Google wrote them.
+
 ## Recommendations for keeping trackers Knit-friendly
 These are optional; Knit copes without them, but each one removes a source of Needs Attention items.
-1. Use the Knit Standard Tracker v1 for every new tracker (section 6).
+1. Use the Knit Standard Tracker v2 for every new tracker (section 7).
 2. Keep one header row and one task per row.
 3. Prefer real date cells. Text dates work if they include the weekday or the year. A multi-day task uses End date rather than a text range.
 4. Give every status column a dropdown, so the wizard can map every option once.

@@ -195,6 +195,17 @@ export const END_DATE_HINT =
   "Date is the first day and End date the last. A blank End date is a one-day task.";
 export const END_DATE_SAME_AS_DATE =
   "Date and End date must be different columns.";
+/** 12.8 (N73): the copy of the owner and checking owner choices at step 4. */
+export const OWNER_LABEL = "Who does the task";
+export const OWNER_HINT =
+  "Tasks reach the Today of the people named in this column.";
+export const CHECKER_LABEL = "Checking owner (optional)";
+export const CHECKER_NONE = "No checking owner column";
+export const CHECKER_HINT =
+  "Who checks that the task is done, shown on the task as Owner. When a row's Who does the task cell is blank, the task goes to the people named here.";
+export const CHECKER_SAME_AS_OWNER =
+  "Who does the task and the checking owner must be different columns.";
+
 export const endDateWarning = (rate: DateParseRate) =>
   `Only ${Math.round(rate.rate * 100)}% of the filled End dates can be read with their Date. Knit cannot read: ${rate.failing.join(", ")}.`;
 
@@ -306,6 +317,8 @@ export function writeTargetProblem(
       (header): [string, string] => [header, "part of the title"],
     ),
     [columns.owner, "the owner"],
+    // N73 (amends N42): nor is the checking owner.
+    [columns.checker, "the checking owner"],
     [columns.sourceRef, "the source ID"],
     [columns.critical?.header, "the critical flag"],
     [KNIT_ID_HEADER, "Knit's own ID column"],
@@ -314,6 +327,7 @@ export function writeTargetProblem(
   const same = (a: string | null | undefined, b: string | null | undefined) =>
     Boolean(a) && Boolean(b) && normaliseKey(a!) === normaliseKey(b!);
   if (same(columns.date, columns.endDate)) return END_DATE_SAME_AS_DATE;
+  if (same(columns.owner, columns.checker)) return CHECKER_SAME_AS_OWNER;
   for (const target of [columns.statusWrite, columns.completedOn]) {
     if (!target) continue;
     const role = roles.find(([header]) => same(header, target));
@@ -421,6 +435,7 @@ export function finalConfig(draft: DraftConfig) {
       statusWrite: columns.statusWrite ?? null,
       completedOn: columns.completedOn ?? null,
       owner: columns.owner ?? null,
+      checker: columns.checker ?? null,
       sourceRef: columns.sourceRef ?? null,
       critical: columns.critical ?? null,
     },

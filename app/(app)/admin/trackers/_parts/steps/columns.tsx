@@ -14,12 +14,17 @@ import {
 } from "@/lib/admin/data";
 import { normaliseKey } from "@/lib/domain/config";
 import {
+  CHECKER_HINT,
+  CHECKER_LABEL,
+  CHECKER_NONE,
   columnSamples,
   DATE_RATE_WARNING,
   dateParseRate,
   END_DATE_HINT,
   endDateParseRate,
   endDateWarning,
+  OWNER_HINT,
+  OWNER_LABEL,
 } from "@/lib/domain/wizard";
 
 // PRD 11 step 4: map the columns. Formula columns are read-only (N6); the date column shows how
@@ -174,8 +179,13 @@ export async function ColumnsStep({ tracker }: { tracker: AdminTracker }) {
                 }
               />
             </Field>
-            {select("owner", "Owner", columns.owner, {
+            {select("owner", OWNER_LABEL, columns.owner, {
               none: "No owner column (tasks go to the tracker owner)",
+              hint: OWNER_HINT,
+            })}
+            {select("checker", CHECKER_LABEL, columns.checker, {
+              none: CHECKER_NONE,
+              hint: CHECKER_HINT,
             })}
             {select("sourceRef", "Source ID", columns.sourceRef, {
               none: "None",

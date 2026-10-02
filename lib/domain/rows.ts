@@ -95,6 +95,8 @@ export function contentHeaders(config: TrackerConfig): string[] {
     columns.title,
     columns.statusRead,
     ...(columns.owner ? [columns.owner] : []),
+    // N73: a row naming only who checks it is not empty.
+    ...(columns.checker ? [columns.checker] : []),
     ...(columns.sourceRef ? [columns.sourceRef] : []),
     ...templateHeaders(config.titleTemplate),
   ];
@@ -154,11 +156,13 @@ export function normaliseRow(row: SheetRow, ctx: RowContext): NormalisedRow {
   }
   const planned = plannedDueSource(date);
 
+  const checkerRaw = columns.checker ? text(columns.checker) : "";
   const owners = assigneesFor(
     columns.owner ? text(columns.owner) : null,
     config,
     aliases,
     ctx.trackerOwnerId,
+    checkerRaw,
   );
 
   const statusRaw = text(columns.statusRead);
@@ -172,6 +176,9 @@ export function normaliseRow(row: SheetRow, ctx: RowContext): NormalisedRow {
     const value = text(header);
     if (value !== "") details[header] = value;
   }
+  // N73: the checking owner's text is kept with the details, under its header, so it is read
+  // and saved like the other content fields (10.3) and the screens can show it (N75).
+  if (columns.checker && checkerRaw !== "") details[columns.checker] = checkerRaw;
 
   const truthy = new Set((columns.critical?.truthy ?? []).map(normaliseKey));
   const subtitle = config.subtitleTemplate

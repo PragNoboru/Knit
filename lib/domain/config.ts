@@ -36,6 +36,12 @@ export const TrackerConfig = z.object({
     completedOn: z.string().min(1).nullable(),
     owner: z.string().min(1).nullable(),
     sourceRef: z.string().min(1).nullable(),
+    /**
+     * N73: an optional checking owner column, who checks the task (the Owner of N72). A row
+     * whose owner cell is blank is assigned from it; its text is shown as the task's Owner
+     * (N75). Never written.
+     */
+    checker: z.string().min(1).nullable().default(null),
     critical: z
       .object({ header: z.string().min(1), truthy: z.array(z.string()) })
       .nullable(),

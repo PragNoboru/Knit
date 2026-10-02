@@ -443,6 +443,8 @@ export async function saveColumns(
     statusWrite,
     completedOn,
     owner: pick("owner"),
+    // N73: optional; null for "No checking owner column".
+    checker: pick("checker"),
     sourceRef: pick("sourceRef"),
     critical: criticalHeader ? { header: criticalHeader, truthy } : null,
   };

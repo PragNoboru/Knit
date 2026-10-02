@@ -61,7 +61,8 @@ export default async function TrackerPage({
     ["Status (read)", config.columns?.statusRead ?? ""],
     ["Status (write)", config.columns?.statusWrite ?? "Not written"],
     ["Completed on", config.columns?.completedOn ?? "Not written"],
-    ["Owner", config.columns?.owner ?? "No owner column"],
+    ["Who does the task", config.columns?.owner ?? "No owner column"],
+    ["Checking owner", config.columns?.checker ?? "None"],
     ["Source ID", config.columns?.sourceRef ?? "None"],
     [
       "Critical",

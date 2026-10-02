@@ -59,18 +59,25 @@ export function resolveOwners(
 /**
  * Who a row's task is assigned to (6.7). Without an owner column, the tracker's owner. With
  * `ownerFilter: "mine"`, only users named in the owner cell. With `"all"`, the tracker's
- * owner as well, so every row reaches them.
+ * owner as well, so every row reaches them. N73: with a checking owner column, a row whose
+ * owner cell names nobody is assigned from the checker cell by the same rules; a filled owner
+ * cell alone decides. Only the names assigned by are resolved, so only they can be unknown.
  */
 export function assigneesFor(
   ownerCell: string | null | undefined,
   config: TrackerConfig,
   aliases: AliasMap,
   trackerOwnerId: string | null,
+  checkerCell: string | null | undefined = null,
 ): { userIds: string[]; unknown: string[] } {
   if (config.columns.owner === null) {
     return { userIds: trackerOwnerId ? [trackerOwnerId] : [], unknown: [] };
   }
-  const resolved = resolveOwners(ownerCell, config.ownerSeparators, aliases);
+  const ownerBlank =
+    splitOwners(ownerCell, config.ownerSeparators).length === 0;
+  const names =
+    ownerBlank && config.columns.checker !== null ? checkerCell : ownerCell;
+  const resolved = resolveOwners(names, config.ownerSeparators, aliases);
   const userIds = new Set(resolved.userIds);
   if (config.ownerFilter === "all" && trackerOwnerId)
     userIds.add(trackerOwnerId);

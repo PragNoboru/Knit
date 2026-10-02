@@ -35,6 +35,8 @@ export function mappedHeaders(config: TrackerConfig): string[] {
     columns.statusWrite,
     columns.completedOn,
     columns.owner,
+    // N73: a mapped checking owner column is checked like any mapped header.
+    columns.checker,
     columns.sourceRef,
     columns.critical?.header ?? null,
     ...config.detailColumns,

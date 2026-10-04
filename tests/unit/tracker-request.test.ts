@@ -183,6 +183,7 @@ describe("the standard examples (N84)", () => {
       template: KNIT_STANDARD_V2,
       taskCount: 10,
       unknownNameRows: [],
+      unknownNames: 0,
     });
   });
 
@@ -309,6 +310,47 @@ describe("variants of the v2 example (N84)", () => {
       kind: "ready",
       taskCount: 10,
       unknownNameRows: [2],
+      unknownNames: 1,
+    });
+  });
+
+  it("counts names, not rows: one unknown Maker on 3 rows is 1 name, two on one row are 2 (N86)", async () => {
+    const file = copyOf(V2);
+    for (const row of [2, 5, 7]) setCell(file, row, "Maker", "Riya");
+    const once = await check(file);
+    expect(once).toMatchObject({
+      kind: "ready",
+      unknownNameRows: [2, 5, 7],
+      unknownNames: 1,
+    });
+    if (once.kind !== "ready") throw new Error("not ready");
+    // The admin's line counts names; the person's line names every row.
+    expect(
+      describeAttention("tracker_request", {
+        fileName: "Brand Zeta",
+        taskCount: once.taskCount,
+        templateId: once.template.id,
+        unknownNames: once.unknownNames,
+      }),
+    ).toContain(" 1 name in it is not known to Knit yet.");
+    expect(
+      sentLines({
+        fileName: "Brand Zeta",
+        taskCount: once.taskCount,
+        template: once.template,
+        unknownNameRows: once.unknownNameRows,
+      })[1],
+    ).toBe(
+      "Rows 2, 5, 7 name people Knit does not know yet. The admin links them when connecting the sheet.",
+    );
+
+    const two = copyOf(V2);
+    setCell(two, 3, "Maker", "Riya + Zed");
+    setCell(two, 6, "Maker", "riya");
+    expect(await check(two)).toMatchObject({
+      kind: "ready",
+      unknownNameRows: [3, 6],
+      unknownNames: 2,
     });
   });
 

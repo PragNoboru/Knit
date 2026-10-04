@@ -192,7 +192,8 @@ async function check(
     p_file_name: read.fileName,
     p_template_id: result.template.id,
     p_task_count: result.taskCount,
-    p_unknown_names: result.unknownNameRows.length,
+    // N86: how many names Knit does not know, not how many rows name them.
+    p_unknown_names: result.unknownNames,
     p_note: note === "" ? null : note,
   });
   if (saved.error) throw saved.error;
@@ -203,7 +204,7 @@ async function check(
   }
   return {
     outcome: "sent",
-    findings: `unknown_names:${result.unknownNameRows.length}`,
+    findings: `unknown_names:${result.unknownNames}`,
     state: {
       error: null,
       notice: REQUEST_COPY.sent,

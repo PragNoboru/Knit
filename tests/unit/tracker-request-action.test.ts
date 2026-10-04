@@ -203,7 +203,7 @@ describe("Check and send (N83)", () => {
       notice: "Sent to the admin.",
       sent: [
         "Brand Zeta tracker: 10 tasks, in the Knit Standard Tracker v2 layout.",
-        // Only Pragaman is known in this fake: Shlok, Aryan and Creative are not (rows).
+        // Only Pragaman is known in this fake: the rows naming the other 4 names are listed.
         expect.stringMatching(/^Rows .* name people Knit does not know yet\./),
       ],
     });
@@ -221,6 +221,8 @@ describe("Check and send (N83)", () => {
       p_file_name: "Brand Zeta tracker",
       p_template_id: "knit-standard-v2",
       p_task_count: 10,
+      // N86: the 4 names, each once, not the rows that name them.
+      p_unknown_names: 4,
       p_note: NOTE,
     });
     expect(fx.runs).toEqual(["discover started", "discover finished"]);

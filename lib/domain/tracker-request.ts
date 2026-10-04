@@ -98,8 +98,10 @@ export type RequestCheck =
       kind: "ready";
       template: StandardTemplate;
       taskCount: number;
-      /** Rows naming people Knit does not know: they do not block (N84). */
+      /** Rows naming people Knit does not know: they do not block (N84). The person sees them (N85). */
       unknownNameRows: number[];
+      /** How many names (normalised, each counted once) Knit does not know: the admin sees it (N86). */
+      unknownNames: number;
     }
   | { kind: "refused"; refusal: StructureRefusal; header?: string }
   | { kind: "findings"; findings: Finding[] };
@@ -230,6 +232,8 @@ export function checkTrackerRequest(input: RequestCheckInput): RequestCheck {
     unknownNameRows: tasks
       .filter((t) => t.unknownOwners.length > 0)
       .map((t) => t.rowNumber),
+    // unknownOwners are already normalised (splitOwners), so a name on many rows counts once.
+    unknownNames: new Set(tasks.flatMap((t) => t.unknownOwners)).size,
   };
 }
 

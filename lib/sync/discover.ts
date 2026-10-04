@@ -1,6 +1,6 @@
 import type { SheetSource } from "@/lib/sheets/types";
 
-import { errorSummary, logEvent } from "./log";
+import { errorCode, errorSummary, logEvent } from "./log";
 import type { SyncStore } from "./store";
 
 /**
@@ -19,12 +19,14 @@ export async function discover(deps: {
     logEvent("discover.done", { job: "discover", run: runId, ...summary });
     return summary;
   } catch (error) {
-    const message = errorSummary(error);
-    await deps.store.finishRun(runId, false, {}, message);
+    // The message goes to sync_runs.error, which only the admin reads (Sync health). The log
+    // carries the code and HTTP status only: a request check runs discover too, and its logs
+    // never hold an error message (N88).
+    await deps.store.finishRun(runId, false, {}, errorSummary(error));
     logEvent("discover.failed", {
       job: "discover",
       run: runId,
-      error: message,
+      ...errorCode(error),
     });
     throw error;
   }

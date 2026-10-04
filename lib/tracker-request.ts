@@ -10,7 +10,6 @@ import {
 } from "@/lib/domain/tracker-request";
 import {
   GOOGLE_SHEET_MIME,
-  SheetError,
   type SheetRow,
   type SheetSource,
   type TabStructure,
@@ -18,7 +17,7 @@ import {
 import { getSupabase } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { discover } from "@/lib/sync/discover";
-import { logEvent } from "@/lib/sync/log";
+import { errorCode, logEvent } from "@/lib/sync/log";
 import type { SyncStore } from "@/lib/sync/store";
 import type { LocalDate } from "@/lib/time";
 
@@ -66,22 +65,7 @@ export function beforeDeadline<T>(
 }
 
 /** An error as N88 logs it: a code and, for Google, its HTTP status. Never a message. */
-export function errorCode(error: unknown): {
-  code: string;
-  status?: number;
-} {
-  if (error instanceof SheetError)
-    return {
-      code: error.code,
-      ...(error.status ? { status: error.status } : {}),
-    };
-  if (error instanceof CheckTimeout) return { code: error.code };
-  const code =
-    typeof error === "object" && error !== null && "code" in error
-      ? (error as { code: unknown }).code
-      : undefined;
-  return { code: typeof code === "string" && code !== "" ? code : "unknown" };
-}
+export { errorCode };
 
 export type SheetRead =
   | {

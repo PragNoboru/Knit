@@ -34,6 +34,7 @@ const fx = vi.hoisted(() => ({
   google: [] as string[],
   runs: [] as string[],
   discoverError: null as unknown,
+  realDiscover: false,
   source: null as unknown,
   refreshed: 0,
 }));
@@ -81,8 +82,16 @@ vi.mock("@/lib/supabase/service", () => ({
   createServiceClient: () => client("service"),
 }));
 vi.mock("@/lib/guide", () => ({ loadTemplateLink: async () => fx.template }));
-vi.mock("@/lib/sync/discover", () => ({
-  discover: async () => {
+vi.mock("@/lib/sync/discover", async (importOriginal) => ({
+  discover: async (
+    deps: Parameters<typeof import("@/lib/sync/discover").discover>[0],
+  ) => {
+    // The real discover, over the fake store below and fx.source's listFolder.
+    if (fx.realDiscover) {
+      const actual =
+        await importOriginal<typeof import("@/lib/sync/discover")>();
+      return actual.discover(deps);
+    }
     fx.runs.push("discover started");
     if (fx.discoverError) {
       fx.runs.push("discover finished (failed)");
@@ -95,6 +104,19 @@ vi.mock("@/lib/sync/discover", () => ({
 vi.mock("@/lib/jobs/cron", () => ({
   jobDeps: async () => ({
     store: {
+      startRun: async (job: string) => {
+        fx.runs.push(`${job} started`);
+        return 41;
+      },
+      finishRun: async (
+        _run: number,
+        ok: boolean,
+        _stats: unknown,
+        error?: string,
+      ) => {
+        fx.runs.push(ok ? "finished" : `failed: ${error ?? ""}`);
+      },
+      recordDriveListing: async () => ({}),
       today: async () => "2026-10-04",
       loadContext: async () => ({
         calendar: CALENDAR,
@@ -185,6 +207,7 @@ beforeEach(() => {
   fx.google = [];
   fx.runs = [];
   fx.discoverError = null;
+  fx.realDiscover = false;
   fx.source = googleWith();
   fx.refreshed = 0;
   log = vi.spyOn(console, "log").mockImplementation(() => undefined);
@@ -508,6 +531,44 @@ describe("logs of a check (N88)", () => {
         "Key (",
       ])
         expect(line, line).not.toContain(secret);
+    }
+  });
+
+  it("carry no error message when discover's listing fails, which goes to the sync run only", async () => {
+    const CANARY = "folder-1CanaryFolderIdXYZ";
+    fx.realDiscover = true;
+    for (const failure of [
+      new SheetError(`Google API 503 for ${CANARY}`, "api_error", 503),
+      // A token or network error carries free text and no usable code.
+      new Error(`request to https://oauth2.googleapis.com failed: ${CANARY}`),
+      Object.assign(new Error(`socket hang up ${CANARY}`), {
+        code: `ECONNRESET ${CANARY}`,
+      }),
+    ]) {
+      fx.source = googleWith({ fail: { listFolder: failure } });
+      expect((await send()).error).toBe(
+        "Knit could not read the sheet just now. Try again in a minute.",
+      );
+    }
+    // Discover ran to its end each time: its run is finished, with the message, in the database.
+    expect(fx.runs.filter((r) => r.startsWith("failed: "))).toHaveLength(3);
+    expect(
+      fx.runs.every((r) => !r.startsWith("failed: ") || r.includes(CANARY)),
+    ).toBe(true);
+    expect(rpcNames()).not.toContain("record_tracker_request");
+
+    const lines = logged();
+    const failed = lines
+      .map((line) => JSON.parse(line) as Record<string, unknown>)
+      .filter((line) => line.event === "discover.failed");
+    expect(failed.map(({ code, status }) => ({ code, status }))).toEqual([
+      { code: "api_error", status: 503 },
+      { code: "unknown", status: undefined },
+      { code: "unknown", status: undefined },
+    ]);
+    for (const line of lines) {
+      expect(line, line).not.toContain(CANARY);
+      expect(line, line).not.toContain("oauth2");
     }
   });
 });

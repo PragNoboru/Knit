@@ -116,3 +116,36 @@ describe("New tracker requested (N86)", () => {
     expect(html.match(/>Dismiss</g)).toHaveLength(2);
   });
 });
+
+describe("Request dismissed. (12.8)", () => {
+  it("has a status line on the page, outside the list a dismissed item leaves", async () => {
+    const html = await render([request()], [listed(FILE)]);
+    const status = html.indexOf('role="status"');
+    expect(status).toBeGreaterThan(-1);
+    expect(status).toBeLessThan(html.indexOf("New tracker requested"));
+  });
+
+  it("tells the page the notice, so it shows after the refresh removes the item", async () => {
+    const { announcing } = await import("@/components/admin/attention-notice");
+    const told: string[] = [];
+    const dismissed = announcing(
+      async () => ({ error: null, notice: "Request dismissed." }),
+      (notice) => told.push(notice),
+    );
+    expect(await dismissed({ error: null }, new FormData())).toEqual({
+      error: null,
+      notice: null,
+    });
+    expect(told).toEqual(["Request dismissed."]);
+
+    // A refusal stays in the dialog, which is still there, and tells the page nothing.
+    const refused = announcing(
+      async () => ({ error: "Add a short reason." }),
+      (notice) => told.push(notice),
+    );
+    expect(await refused({ error: null }, new FormData())).toEqual({
+      error: "Add a short reason.",
+    });
+    expect(told).toEqual(["Request dismissed."]);
+  });
+});

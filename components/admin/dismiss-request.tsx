@@ -1,8 +1,9 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useId, useMemo, useState } from "react";
 
 import { ActionForm } from "@/components/admin/action-form";
+import { announcing, useAnnounce } from "@/components/admin/attention-notice";
 import { Field, TextInput } from "@/components/admin/fields";
 import { Button } from "@/components/ui/button";
 import {
@@ -27,6 +28,12 @@ export function DismissRequest({
 }) {
   const id = useId();
   const [open, setOpen] = useState(false);
+  // "Request dismissed." outlives this dialog: the refresh removes the item (12.8).
+  const announce = useAnnounce();
+  const dismiss = useMemo(
+    () => announcing(action, announce),
+    [action, announce],
+  );
   return (
     <>
       <Button
@@ -42,7 +49,7 @@ export function DismissRequest({
           <DialogHeader>
             <DialogTitle>Dismiss this request</DialogTitle>
           </DialogHeader>
-          <ActionForm action={action} submitLabel="Dismiss request">
+          <ActionForm action={dismiss} submitLabel="Dismiss request">
             <Field
               label="Reason"
               htmlFor={id}

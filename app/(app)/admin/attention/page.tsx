@@ -3,6 +3,7 @@ import Link from "next/link";
 
 import { ActionButton } from "@/components/admin/action-button";
 import { ActionForm } from "@/components/admin/action-form";
+import { AttentionNotices } from "@/components/admin/attention-notice";
 import { DismissRequest } from "@/components/admin/dismiss-request";
 import { NativeSelect, Section } from "@/components/admin/fields";
 import { TrackerChip } from "@/components/tracker-chip";
@@ -49,6 +50,25 @@ export default async function AttentionPage() {
   return (
     <div className="flex flex-col gap-5">
       <h1 className="text-xl font-semibold tracking-tight">Needs Attention</h1>
+      {/* Outcomes such as "Request dismissed." show here, above the list they left (12.8). */}
+      <AttentionNotices>
+        <AttentionGroups groups={groups} users={users} listed={listed} />
+      </AttentionNotices>
+    </div>
+  );
+}
+
+function AttentionGroups({
+  groups,
+  users,
+  listed,
+}: {
+  groups: ReturnType<typeof groupAttention<AttentionItem>>;
+  users: { id: string; name: string }[];
+  listed: ReadonlySet<string>;
+}) {
+  return (
+    <>
       {groups.length === 0 ? (
         <p className="text-sm text-muted-foreground">
           Nothing needs attention.
@@ -91,7 +111,7 @@ export default async function AttentionPage() {
           </div>
         </Section>
       ))}
-    </div>
+    </>
   );
 }
 

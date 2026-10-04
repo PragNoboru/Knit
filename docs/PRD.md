@@ -90,7 +90,7 @@ The source trackers stay the place where work is planned. Knit is the place wher
 
 Status: **Adopted** = settled. **Default** = adopted as the default because the owner has not confirmed yet; build it exactly as written, and make it a config value where noted so it can change without code.
 
-On 28 Sep 2026 Pragaman confirmed every decision then marked Default (D1 to D9, N1 to N19) as Adopted. N20 to N58 record how the fixes from the Phase 1 audit and its review (28 Sep 2026) behave where the PRD was silent; they are Defaults until confirmed. On 1 Oct 2026 Pragaman adopted N20 to N58 as built, except N28, N30 and N42, which he changed as their rows now say (N24, N34 and N54 follow from those changes); N59 and N60 are the Defaults those changes needed. The same day he resolved Q6 (N15, 6.10) and settled D15. On 1 Oct 2026 Pragaman also approved an optional End date column (A) and a wizard preset for the Knit Standard Tracker v1 (B), the template every brand's tracker used from Phase 2 go-live, then planned for Tue 13 Oct 2026; N64 to N70 are the Defaults that carry them out. On 2 Oct 2026 Pragaman moved Phase 2 go-live to Mon 5 Oct 2026, with every tracker built fresh from the template (N71), split a task's people into an Owner who checks it and a Maker who does it (N72), which the template's version 2 carries (N74), and listed what later versions of Knit will add (N76, section 22). He kept every default offered; N73 and N75 are the Defaults for the details he did not state.
+On 28 Sep 2026 Pragaman confirmed every decision then marked Default (D1 to D9, N1 to N19) as Adopted. N20 to N58 record how the fixes from the Phase 1 audit and its review (28 Sep 2026) behave where the PRD was silent; they are Defaults until confirmed. On 1 Oct 2026 Pragaman adopted N20 to N58 as built, except N28, N30 and N42, which he changed as their rows now say (N24, N34 and N54 follow from those changes); N59 and N60 are the Defaults those changes needed. The same day he resolved Q6 (N15, 6.10) and settled D15. On 1 Oct 2026 Pragaman also approved an optional End date column (A) and a wizard preset for the Knit Standard Tracker v1 (B), the template every brand's tracker used from Phase 2 go-live, then planned for Tue 13 Oct 2026; N64 to N70 are the Defaults that carry them out. On 2 Oct 2026 Pragaman moved Phase 2 go-live to Mon 5 Oct 2026, with every tracker built fresh from the template (N71), split a task's people into an Owner who checks it and a Maker who does it (N72), which the template's version 2 carries (N74), and listed what later versions of Knit will add (N76, section 22). He kept every default offered; N73 and N75 are the Defaults for the details he did not state. On 4 Oct 2026, after go-live, Pragaman asked for a Guide in Knit for members and the admin (N77), asked how a name marked Not a Knit user becomes a person, and asked whether people can get the tracker format and add a tracker themselves; N78 to N82 are the Defaults for the details he did not state.
 
 | # | Decision | Rule | Status |
 | --- | --- | --- | --- |
@@ -185,6 +185,12 @@ On 28 Sep 2026 Pragaman confirmed every decision then marked Default (D1 to D9, 
 | N74 | Knit Standard Tracker v2 (11.1, N70; decided 2 Oct 2026) | Version 2 (`knit-standard-v2`) is added beside v1, which never changes (N70). Row 1, columns A to O: Task ID, Date, End date, Task, Details / done when, Workstream, Owner, Maker, Priority, Status, Stage, Done on, Depends on, Link, Notes. Its standard setup is v1's (11.1) except that the owner column is Maker (separator ",") and the checking owner column is Owner (N73); the detail columns stay v1's. A row 1 that matches v2 never matches v1, and the other way round (Maker stands where v1 has Priority). The wizard offers the newest version row 1 matches and names it in the step 3 heading. Trackers set up from v1 keep their mapping | Adopted |
 | N75 | Showing the Owner (12.3, 12.5, 12.6) | When a tracker maps a checking owner column and a task's checker cell is filled, the task's row in Today, Day, Calendar and All Tasks shows "Owner: {names}", the cell's text as the sheet shows it. The drawer then shows "Owner" (the checker cell, or None) and "Maker" (the owner cell; when it is blank in the sense of N73, the checker cell; else None) in place of the single Owner line. Wizard step 8's preview shows the same "Owner" and "Maker" columns, by the same rule, in place of its Owner column (11). Rows and drawers of trackers without a checker column look as before | Default |
 | N76 | Later versions (section 22, decided 2 Oct 2026) | A designation hierarchy, teams, assigning tasks to team members inside Knit, and the Owner check step (N72) are planned for later versions of Knit and are not built now. Until then tasks are planned and assigned only in the sheets (3.2) | Adopted |
+| N77 | The Guide (12.9, asked for 4 Oct 2026) | A Guide page explains how to use Knit, for members and for the admin. Members see the sections for everyone; the admin sees those and the admin sections, which the server renders only for the admin, so a member's page never holds them | Adopted |
+| N78 | Where the Guide is reached (12.2, 12.7, 12.9) | `/guide`, from a Guide item in the user menu, above Sign out, and from "No trackers are connected to your account yet." and "Connect your first tracker.", which also offer "Open the Guide". The main links (Today, Calendar, All Tasks, Admin) stay as they are | Default |
+| N79 | What the Guide says (12.9) | Static text in code, in short sections with headings. It names screens, buttons and labels exactly as the app shows them; status labels, Today's group titles, wizard step titles, Needs Attention titles and the template's headers come from the modules that define them, so they cannot drift. A change to a screen it describes updates the Guide in the same change. It reads nothing from the database but the template link (N80) | Default |
+| N80 | Tracker template link (8.1, 12.9, 13) | The admin saves the link to the blank tracker template on the Guide page. Only a `https://docs.google.com/spreadsheets/d/{id}` link is taken (the id 20 to 128 letters, digits, `-` or `_`; anything may follow it, such as `/edit#gid=0`), and Knit keeps it in `settings` under `tracker_template_url` as `https://docs.google.com/spreadsheets/d/{id}`. An empty field removes it. Everyone sees "Get the tracker template", which opens Google's make-a-copy page, `https://docs.google.com/spreadsheets/d/{id}/copy`, in a new tab; without a link a member reads "Ask the admin for the tracker template.". The page reads that one key on the server with the service role (9.2, 9.3). The link is never logged | Default |
+| N81 | New trackers from people (12.9, asked 4 Oct 2026) | Knit takes no uploaded files: it reads only Google Sheets in the Knit folder (D14), and an uploaded Excel file is listed as Not a Google Sheet (7.4). A person who needs a new tracker makes a copy of the template from the Guide, fills it in the template's format, moves it into the Knit folder (or asks the admin to), and the admin connects it (11). Uploading a file into Knit is not built | Default |
+| N82 | A name given a login (6.7, 12.8) | Creating a user with a Name in trackers saves that name as the new person's alias, also when it was marked Not a Knit user or linked to someone else, and pulls every tracker again (N44). From that pull, at once or within 10 minutes, every task the name is assigned by goes to the new person: it reaches their Today, and they see its history. Names in trackers does the same for an existing person. Each spelling of a name is its own alias | Default |
 
 ---
 
@@ -479,7 +485,7 @@ create table people_aliases (
 
 create table holidays (day date primary key, name text not null);
 create table calendar_days (day date primary key, is_working boolean not null, reason text);
-create table settings (key text primary key, value jsonb not null);  -- knit_folder_id, archive_sheet_id, go_live defaults
+create table settings (key text primary key, value jsonb not null);  -- knit_folder_id, archive_sheet_id, go_live defaults, tracker_template_url (N80)
 
 create table drive_files (
   file_id text primary key,
@@ -685,13 +691,13 @@ All are `security definer`, set `search_path = public`, and check the caller the
 - `tasks`, `task_days`, `events`: select allowed when the caller is admin, or the task has a `task_assignees` row for the caller. No insert, update or delete for `authenticated`; changes only through RPC.
 - `task_assignees`: select allowed when the caller is admin, or the row's `user_id` is the caller. No insert, update or delete for `authenticated`; rows change only through RPC and the pull job.
 - `trackers`: members can select trackers that have at least one task assigned to them (name and colour only, through a view `tracker_public`). Admin full select. Writes through admin server actions.
-- `outbox`, `sync_runs`, `day_closures`, `attention_items`, `job_leases`, `drive_files`, `settings`, `people_aliases`: admin select only (members can insert `attention_items` of kind `member_report` through an RPC). `people_aliases` is written through admin server actions.
+- `outbox`, `sync_runs`, `day_closures`, `attention_items`, `job_leases`, `drive_files`, `settings`, `people_aliases`: admin select only (members can insert `attention_items` of kind `member_report` through an RPC). `people_aliases` is written through admin server actions, and `settings.tracker_template_url` through `saveTemplateLink`. The Guide reads that one key for every signed-in user on the server (N80, 9.3).
 - `holidays`, `calendar_days`: all authenticated users select; admin writes.
 
 ### 9.3 Other security rules
 - Public sign-up disabled in Supabase Auth. Users are created by admin through the Auth Admin API from a server action.
 - Job endpoints reject any request without the correct `x-knit-cron-secret` (constant-time comparison) and are excluded from auth middleware.
-- The service-role key is used only in job endpoints and admin server actions, never in code that can reach the browser.
+- The service-role key is used only in job endpoints and admin server actions, and on the server for the Guide's read of the template link (N80), never in code that can reach the browser.
 - All server action inputs are validated with zod.
 - Security headers via Next.js config (no framing, strict referrer policy).
 
@@ -833,10 +839,11 @@ Copy ({template} is the matching version's name: "Knit Standard Tracker v1" or "
 | `/admin/attention` | Needs Attention queue | admin |
 | `/admin/people` | Users and people aliases | admin |
 | `/admin/holidays` | Holidays; refresh calendar | admin |
+| `/guide` | Guide (12.9) | signed in; the admin sections for the admin only |
 | Task drawer | `?task=<id>` on any list route | per RLS |
 
 ### 12.2 Layout and style
-- Top bar: Knit wordmark, date, links (Today, Calendar, All Tasks, Admin), Sync now, user menu.
+- Top bar: Knit wordmark, date, links (Today, Calendar, All Tasks, Admin), Sync now, user menu (name and email, Guide, Sign out; N78).
 - Tracker chips: one colour each from the palette `indigo, teal, amber, rose, violet, emerald, sky, orange`, always with the tracker name as text.
 - Status never relies on colour alone: every status has an icon and a label.
 - Noboru brand theme (decided 1 Oct 2026, replacing the neutral theme through the same CSS variables): white surfaces and near-black text (#212121) in light mode, near-black surfaces and near-white text in dark mode, and Noboru lime (#77cb35) as the one accent, with near-black text on lime fills. Where lime is too light to read on white (text, links, focus rings) a darker shade of the same green is used, so every pair meets WCAG AA: 4.5:1 for text, and 3:1 for solid focus indicators. A lime button is identified by its near-black label (about 8:1 on lime), so its fill needs no contrast with the page. Font: Poppins. The Noboru mark (a lime and a black triangle) sits beside the Knit wordmark and is the app icon; the product name stays Knit. Tracker colours (8-colour palette) and status colours stay distinct from the accent. Light and dark follow the system.
@@ -888,8 +895,8 @@ Title, subtitle, tracker chip, source ID, planned raw text (the Date, or Date to
 | Off day selected | "Day off ({reason}). Nothing is due or spills here." | Jump to next working day |
 | Past day, nothing scheduled | "Nothing was scheduled on this day." | none |
 | Tracker cannot sync | Banner as in 12.3 | Admin: Fix link to tracker settings |
-| New member, no tasks | "No trackers are connected to your account yet." | Contact admin |
-| Admin, no trackers yet | "Connect your first tracker." | Link to Admin > Trackers |
+| New member, no tasks | "No trackers are connected to your account yet." | Contact admin; Open the Guide (N78) |
+| Admin, no trackers yet | "Connect your first tracker." | Link to Admin > Trackers; Open the Guide (N78) |
 
 ### 12.8 Admin screens
 - Trackers: list with state, last pull, task count, open attention count; New sheet found section; Set up, Pause, Resume, Sync now, Edit mapping, Archive.
@@ -899,8 +906,19 @@ Title, subtitle, tracker chip, source ID, planned raw text (the Date, or Date to
 - Setup wizard, step 4 (N64): the End date dropdown reads "End date (optional)" with the choice "No end date column" and the hint "Date is the first day and End date the last. A blank End date is a one-day task." Under 90% readable: "Only {n}% of the filled End dates can be read with their Date. Knit cannot read: {values}." Choosing the Date column again: "Date and End date must be different columns." As a write target: ""{header}" is the planned end date, which Knit never changes. Choose another column to write to." Standard setup copy: 11.1.
 - Setup wizard, step 4 (N73): the owner dropdown reads "Who does the task" with the hint "Tasks reach the Today of the people named in this column." and keeps its choice "No owner column (tasks go to the tracker owner)". After it, "Checking owner (optional)" with the choice "No checking owner column" and the hint "Who checks that the task is done, shown on the task as Owner. When a row's Who does the task cell is blank, the task goes to the people named here." Choosing the owner column again: "Who does the task and the checking owner must be different columns." Choosing a checking owner with "No owner column (tasks go to the tracker owner)": "Choose the Who does the task column to use a checking owner." As a write target: ""{header}" is the checking owner, which Knit never changes. Choose another column to write to."
 - Tracker page mapping summary: an "End date" row after Date, showing the header or "None". The Owner row reads "Who does the task", followed by a "Checking owner" row showing the header or "None" (N73).
-- People: users (create, deactivate, reset password) and aliases (add, link to user, mark non-user).
+- People: users (create, with an optional Name in trackers that becomes their alias, N82; deactivate; reset password) and aliases (add, link to user, mark non-user).
 - Holidays: list, add, remove; saving calls `refresh_calendar`. Warns if a change affects task-days already created (their due dates are recomputed for unlocked task-days only).
+
+### 12.9 Guide (N77 to N82)
+`/guide` explains how to use Knit. Every signed-in user reaches it from Guide in the user menu, above Sign out, and from two empty states of 12.7; the main links of 12.2 do not change (N78).
+
+- Layout: one column, readable at 390 px. The heading "Guide", one line of introduction, a list of the sections as links, then each section under its own heading, in short paragraphs and lists.
+- Sections for everyone, in this order: What Knit is; Today; Day view and Calendar; All Tasks and the task drawer; Statuses; How a change reaches the sheet; The Knit Note; Spillover and the midnight close; Owner and Maker; Sync now; Report an issue; Working days and holidays; Add a new tracker.
+- Sections for the admin, under the heading "For the admin", in this order: Connect a tracker; Whose rows reach Today; People; Needs Attention; Sync health; Holidays; Edit mapping; Pause, Resume, Archive; Corrections and the backlog review; The template's columns; Tracker template link. The server renders them only for the admin: a member's page never contains them (N77).
+- Copy (N79): what the Guide says matches the screens and this PRD. Screen names, buttons and labels are written as the app shows them; status labels, Today's group titles, wizard step titles, Needs Attention titles and the template's headers come from the modules that define them. Plain words, short sentences, no em dashes, as 12.3 and 12.7.
+- Add a new tracker (N81) says that Knit reads only Google Sheets in the Knit folder and takes no uploaded file, then: make a copy of the template, fill it following its format, move it into the Knit folder (or ask the admin to), and tell the admin, who connects it. With a template link saved it shows the link "Get the tracker template", opening `https://docs.google.com/spreadsheets/d/{id}/copy` in a new tab (N80). Without one, a member reads "Ask the admin for the tracker template." and the admin reads "No template link yet. Add it under Tracker template link below."
+- Tracker template link (admin, N80): the field "Link to the tracker template" with the hint "The Google Sheets link of the blank template. Everyone gets a link to make their own copy. Leave it empty to remove it.", and the button "Save link". A link that is not a Google Sheet is refused: "Paste the link of a Google Sheet. It starts with https://docs.google.com/spreadsheets/d/". Saved: "Link saved."; removed: "Link removed."; a failed save: "The link could not be saved. Try again."
+- People (admin section) says how a name marked Not a Knit user becomes a person (N82): create their login with that name in Name in trackers, or link it to an existing person under Names in trackers.
 
 ---
 
@@ -920,6 +938,7 @@ Title, subtitle, tracker chip, source ID, planned raw text (the Date, or Date to
 | `backlogAction` | action (admin) | taskIds, action, reason? | RPC |
 | `createUser`, `deactivateUser`, `upsertAlias` | actions (admin) | | service role |
 | `upsertHoliday`, `deleteHoliday` | actions (admin) | | then `refresh_calendar` |
+| `saveTemplateLink` | action (admin) | url (empty to remove) | N80: refused for a member; a link that is not `https://docs.google.com/spreadsheets/d/{id}` is refused; saves `settings.tracker_template_url` with the service role, or deletes that row when empty; never logs the link |
 | `/api/jobs/pull` | POST | `{force?: boolean, trackerIds?: string[]}` | cron secret |
 | `/api/jobs/push` | POST | none | cron secret |
 | `/api/jobs/close` | POST | none | cron secret |
@@ -975,6 +994,7 @@ app/
   (app)/calendar/
   (app)/tasks/
   (app)/admin/{trackers,sync,attention,people,holidays}/
+  (app)/guide/                   Guide (12.9)
   api/jobs/{pull,push,close,structure}/route.ts
   api/health/route.ts
 components/                      UI only, no business rules
@@ -1003,7 +1023,8 @@ docs/                            this PRD, SOW, TRACKERS, RUNBOOK (written durin
 - **Fixture tests**: run the whole read path (XlsxFixtureSource + config + planner) over each example tracker and assert the `expected` block in `fixtures/trackers.config.json` (row counts, my rows, date kinds, off-day moves, formula columns detected, no unmapped statuses except the documented pending ones). Unit also covers: every `endDateCases` case in `fixtures/date-parser.cases.json`; the same result as before for every `cases` entry when no End date is mapped; End date changes in `planPull` (moved, same due date, cleared into the past, invalid, waiting for close); the standard setup rules (N68 to N70). Fixture tests also cover `Knit_Standard_Tracker_v1_example.xlsx` and `Knit_Standard_Tracker_v2_example.xlsx`, examples in the standard layouts, check that the standard setup produces exactly their registry entries, and check that every mapped header (End date and checking owner included) exists. Unit tests also cover the checking owner column (N73). E2E also connects both examples with Use the standard setup, and checks that a v2 row whose Maker and Owner differ reaches the Maker and shows "Owner: {names}".
 - **Integration (local Supabase via CLI)**: `set_task_status` permission and lock rules; `close_day` creates spillovers, skips holidays and off Saturdays, is idempotent when run twice; catch-up over a 3-day gap; `admin_correct_task_day` closes the chain; `apply_pull_plan` returns retry on stale `state_version`; RLS: a member cannot read another member's tasks.
 - **Race tests (MemorySheetSource)**: row inserted between ID write and verify; rows sorted between read and push; duplicate Knit IDs; push after a column move.
-- **E2E (Playwright)**: log in, see Today, change a status, see Syncing clear; pull forward from Calendar; locked past day is read-only; empty states render. They run against local Supabase in local sheet mode (N16), seeded by `pnpm seed:local`; CI fixes `knit_today()` for the Data API with a role setting on `authenticator` (superuser only, never in production), connects the example trackers on Mon 28 Sep 2026, moves to Wed 30 Sep and runs the close, then takes screenshots at 1280 px and 390 px.
+- **E2E (Playwright)**: log in, see Today, change a status, see Syncing clear; pull forward from Calendar; locked past day is read-only; empty states render. They run against local Supabase in local sheet mode (N16), seeded by `pnpm seed:local`; CI fixes `knit_today()` for the Data API with a role setting on `authenticator` (superuser only, never in production), connects the example trackers on Mon 28 Sep 2026, moves to Wed 30 Sep and runs the close, then takes screenshots at 1280 px and 390 px. E2E also opens the Guide as the admin and as a member, has the admin save the template link and checks that the member then sees Get the tracker template and no admin section.
+- **Guide (N77 to N80)**: unit tests for the template link check and the make-a-copy link; render tests that a member's Guide holds no admin section and the admin's does; tests that `saveTemplateLink` refuses a member and a link that is not a Google Sheet.
 - Time is always injected; tests run with `TZ=UTC` to prove IST handling does not depend on the machine. In SQL, integration tests freeze `knit_today()` per transaction through its test clock (`set_config('knit.today', ...)`), which the Data API cannot set.
 - The integration tests also run on PGlite (Postgres in-process, with a stand-in for Supabase's auth schema) for machines without Docker. CI runs both; local Supabase is the reference.
 

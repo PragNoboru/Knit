@@ -1317,3 +1317,67 @@ describe("the tracker template link (12.9, N80)", () => {
     ).toEqual({ error: "The link could not be saved. Try again." });
   });
 });
+
+describe("answering a request for a new tracker (N86, 12.8)", () => {
+  const reasonForm = (reason: string) => {
+    const form = new FormData();
+    form.set("reason", reason);
+    return form;
+  };
+  const dismiss = (reason: string, id = 4) =>
+    actions.dismissTrackerRequest(id, { error: null }, reasonForm(reason));
+
+  it("dismisses with a reason, as the admin", async () => {
+    expect(await dismiss("  Use the Sapiens tracker  ")).toEqual({
+      error: null,
+      notice: "Request dismissed.",
+    });
+    expect(fx.rpcs).toEqual([
+      {
+        fn: "admin_dismiss_tracker_request",
+        args: { p_id: 4, p_reason: "Use the Sapiens tracker" },
+        as: "user",
+      },
+    ]);
+  });
+
+  it("is refused to a member, without a reason, with a long one or a bad id", async () => {
+    fx.user = { ...ADMIN, isAdmin: false };
+    expect(await dismiss("No")).toEqual({
+      error: "Only the admin can do this.",
+    });
+    fx.user = ADMIN;
+    expect(await dismiss("   ")).toEqual({ error: "Add a short reason." });
+    expect(await dismiss("x".repeat(141))).toEqual({
+      error: "The reason is too long. Keep it to one line.",
+    });
+    expect(await dismiss("No", -1)).toEqual({
+      error: "This is no longer valid. Reload the page and try again.",
+    });
+    expect(fx.rpcs).toEqual([]);
+  });
+
+  it("says when the request was already answered", async () => {
+    fx.results["rpc.admin_dismiss_tracker_request"] = {
+      data: null,
+      error: { message: "request_not_open" },
+    };
+    expect(await dismiss("No")).toEqual({
+      error: "This request was already answered.",
+    });
+  });
+
+  it("the plain Dismiss shows the database's refusal instead of looking done", async () => {
+    fx.results["rpc.admin_set_attention_state"] = {
+      data: null,
+      error: { message: "request_needs_reason" },
+    };
+    expect(await actions.setAttentionState(9, "dismissed")).toEqual({
+      error: "Dismiss this request with a reason.",
+    });
+    fx.results["rpc.admin_set_attention_state"] = { data: null, error: null };
+    expect(await actions.setAttentionState(9, "dismissed")).toEqual({
+      error: null,
+    });
+  });
+});

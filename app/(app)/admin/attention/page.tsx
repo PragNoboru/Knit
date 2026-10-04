@@ -3,15 +3,19 @@ import Link from "next/link";
 
 import { ActionButton } from "@/components/admin/action-button";
 import { ActionForm } from "@/components/admin/action-form";
+import { DismissRequest } from "@/components/admin/dismiss-request";
 import { NativeSelect, Section } from "@/components/admin/fields";
 import { TrackerChip } from "@/components/tracker-chip";
+import { buttonVariants } from "@/components/ui/button";
 import {
+  dismissTrackerRequest,
   linkOwnerName,
   mapStatusWord,
   retryWrites,
   setAttentionState,
 } from "@/lib/actions/admin";
 import {
+  loadAdminTrackers,
   loadAttention,
   loadPeople,
   type AttentionItem,
@@ -28,10 +32,18 @@ import { formatInstant } from "@/lib/time";
 export const metadata: Metadata = { title: "Needs Attention · Knit" };
 
 // PRD 12.8: grouped by tracker and kind; each item says what happened and where, with its
-// actions: map status, link owner, dismiss, retry.
+// actions: map status, link owner, dismiss, retry. A New tracker requested item (N86) offers
+// Set up while its sheet is listed in the Knit folder, Open the sheet, and Dismiss with a
+// reason.
 export default async function AttentionPage() {
-  const [items, people] = await Promise.all([loadAttention(), loadPeople()]);
+  const [items, people, admin] = await Promise.all([
+    loadAttention(),
+    loadPeople(),
+    loadAdminTrackers(),
+  ]);
   const users = people.users.filter((u) => u.is_active);
+  // N86: the pick-tab page (11 step 2) opens only for a file admin_trackers lists.
+  const listed = new Set(admin.files.map((f) => f.fileId));
   const groups = groupAttention(items);
 
   return (
@@ -66,7 +78,12 @@ export default async function AttentionPage() {
                 </h3>
                 <ul className="flex flex-col divide-y">
                   {kind.items.map((item) => (
-                    <Item key={item.id} item={item} users={users} />
+                    <Item
+                      key={item.id}
+                      item={item}
+                      users={users}
+                      listed={listed}
+                    />
                   ))}
                 </ul>
               </div>
@@ -81,9 +98,11 @@ export default async function AttentionPage() {
 function Item({
   item,
   users,
+  listed,
 }: {
   item: AttentionItem;
   users: { id: string; name: string }[];
+  listed: ReadonlySet<string>;
 }) {
   const row = attentionRow(item.detail, item.task?.rowHint ?? null);
   const sheetLink =
@@ -188,13 +207,65 @@ function Item({
             Holidays
           </Link>
         ) : null}
-        <ActionButton
-          action={setAttentionState.bind(null, item.id, "dismissed")}
-          variant="ghost"
-        >
-          Dismiss
-        </ActionButton>
+        {item.kind === "tracker_request" ? (
+          <TrackerRequestActions item={item} listed={listed} />
+        ) : (
+          <ActionButton
+            action={setAttentionState.bind(null, item.id, "dismissed")}
+            variant="ghost"
+          >
+            Dismiss
+          </ActionButton>
+        )}
       </div>
     </li>
+  );
+}
+
+/**
+ * N86, 12.8: Set up (11 step 2 for the sheet) only while the sheet is listed in the Knit
+ * folder, Open the sheet, and Dismiss with a reason the person sees.
+ */
+function TrackerRequestActions({
+  item,
+  listed,
+}: {
+  item: AttentionItem;
+  listed: ReadonlySet<string>;
+}) {
+  const fileId =
+    typeof item.detail.fileId === "string" ? item.detail.fileId : "";
+  const requestId = Number(item.detail.requestId);
+  return (
+    <>
+      {listed.has(fileId) ? (
+        <Link
+          href={`/admin/trackers/new/${encodeURIComponent(fileId)}`}
+          className={buttonVariants({ size: "sm" })}
+        >
+          Set up
+        </Link>
+      ) : (
+        <span className="text-sm text-muted-foreground">
+          The sheet is no longer in the Knit folder.
+        </span>
+      )}
+      {fileId !== "" ? (
+        <a
+          href={`https://docs.google.com/spreadsheets/d/${encodeURIComponent(fileId)}/edit`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-sm font-medium underline"
+        >
+          Open the sheet
+        </a>
+      ) : null}
+      {Number.isInteger(requestId) && requestId > 0 ? (
+        <DismissRequest
+          action={dismissTrackerRequest.bind(null, requestId)}
+          requester={item.reporter ?? "The person"}
+        />
+      ) : null}
+    </>
   );
 }

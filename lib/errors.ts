@@ -31,6 +31,9 @@ const MESSAGES: Record<string, string> = {
   task_day_not_locked:
     "Only a closed day can be corrected. Change the status instead.",
   calendar_not_covered: "The calendar does not cover this date yet.",
+  // N86, 12.8: answering a request for a new tracker.
+  request_not_open: "This request was already answered.",
+  request_needs_reason: "Dismiss this request with a reason.",
 };
 
 export const GENERIC_ERROR = "Something went wrong. Try again.";

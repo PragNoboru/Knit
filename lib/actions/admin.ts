@@ -1030,14 +1030,23 @@ export async function recreateKnitIdColumn(
 // ---------------------------------------------------------------------------------------
 // Needs Attention (12.8): map status, link owner, dismiss, retry
 
-async function markAttention(itemId: number, state: "resolved" | "dismissed") {
+/** The database's refusal, in plain language, or null when the item changed. */
+async function markAttention(
+  itemId: number,
+  state: "resolved" | "dismissed",
+): Promise<string | null> {
   const supabase = await getSupabase();
-  await supabase.rpc("admin_set_attention_state", {
+  const { error } = await supabase.rpc("admin_set_attention_state", {
     p_id: itemId,
     p_state: state,
   });
+  return error ? messageFor(error) : null;
 }
 
+/**
+ * 12.8: Dismiss an item. When the database refuses (a New tracker requested item needs a
+ * reason, N86), the page says so instead of looking done.
+ */
 export async function setAttentionState(
   itemId: number,
   state: "resolved" | "dismissed",
@@ -1048,9 +1057,48 @@ export async function setAttentionState(
     .object({ itemId: ItemId, state: z.enum(["resolved", "dismissed"]) })
     .safeParse({ itemId, state });
   if (!parsed.success) return INVALID;
-  await markAttention(parsed.data.itemId, parsed.data.state);
+  const error = await markAttention(parsed.data.itemId, parsed.data.state);
+  if (error) return { error };
   refresh();
   return { error: null };
+}
+
+/**
+ * N86, 12.8: Dismiss a request for a new tracker with a one-line reason (D2), which the person
+ * sees with their request (N85). The request and its item are dismissed together.
+ */
+export async function dismissTrackerRequest(
+  requestId: number,
+  _previous: FormState,
+  form: FormData,
+): Promise<FormState> {
+  const denied = await adminRefusal();
+  if (denied) return denied;
+  if (!ItemId.safeParse(requestId).success) return INVALID;
+  const reason = z
+    .string()
+    .trim()
+    .min(1)
+    .max(REASON_MAX_LENGTH)
+    .safeParse(form.get("reason") ?? "");
+  if (!reason.success)
+    return {
+      error: messageFor({
+        message:
+          typeof form.get("reason") === "string" &&
+          String(form.get("reason")).trim() !== ""
+            ? "reason_too_long"
+            : "reason_required",
+      }),
+    };
+  const supabase = await getSupabase();
+  const { error } = await supabase.rpc("admin_dismiss_tracker_request", {
+    p_id: requestId,
+    p_reason: reason.data,
+  });
+  if (error) return { error: messageFor(error) };
+  refresh();
+  return { error: null, notice: "Request dismissed." };
 }
 
 /** 6.8, N19(d): map an unmapped word; saving the map pulls the tracker again. */

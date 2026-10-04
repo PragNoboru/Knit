@@ -5,7 +5,7 @@ import type { AdminTrackers } from "@/lib/admin/data";
 
 // PRD 12.8 Trackers (audit findings 39, 38, C7): another tab of a connected spreadsheet can be
 // set up; a tracker paused for a missing Knit ID column is not offered Resume; a file that is
-// not a Google Sheet says how to fix it (7.4).
+// not a Google Sheet says how to fix it (7.4); a requested sheet names who sent it (N86).
 
 const data = vi.hoisted(() => ({ value: null as unknown }));
 
@@ -114,11 +114,29 @@ describe("Admin > Trackers", () => {
           state: "not_a_sheet",
           modifiedTime: null,
           trackers: 0,
+          requestedBy: null,
         },
       ],
     });
     expect(html).toContain(
       "Sapiens.xlsx: Not a Google Sheet: open it and use File &gt; Save as Google Sheets",
     );
+  });
+
+  it("names who requested a new sheet, and nothing for one nobody requested (N86)", async () => {
+    const file = (fileId: string, requestedBy: string | null) => ({
+      fileId,
+      name: fileId,
+      state: "new" as const,
+      modifiedTime: null,
+      trackers: 0,
+      requestedBy,
+    });
+    const html = await render({
+      trackers: [],
+      files: [file("Brand_X", "Shlok"), file("Brand_Y", null)],
+    });
+    expect(html).toContain("Requested by Shlok");
+    expect(html.match(/Requested by/g)).toHaveLength(1);
   });
 });

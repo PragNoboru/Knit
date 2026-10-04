@@ -13,6 +13,7 @@ import {
 } from "@/lib/actions/admin";
 import { loadAdminTrackers } from "@/lib/admin/data";
 import { pausedForMissingKnitIds } from "@/lib/admin/pause";
+import { requestedByText } from "@/lib/domain/tracker-request";
 import { formatInstant } from "@/lib/time";
 
 export const metadata: Metadata = { title: "Trackers · Knit" };
@@ -29,7 +30,8 @@ const STATE_LABELS = {
   archived: "Archived",
 } as const;
 
-// PRD 12.8 Trackers: state, last pull, task count, open attention count; New sheet found.
+// PRD 12.8 Trackers: state, last pull, task count, open attention count; New sheet found,
+// with who requested a sheet (N86).
 export default async function TrackersPage() {
   const { trackers, files } = await loadAdminTrackers();
   const newFiles = files.filter(
@@ -67,6 +69,11 @@ export default async function TrackersPage() {
               >
                 <div>
                   <p className="font-medium">{file.name}</p>
+                  {file.requestedBy ? (
+                    <p className="text-xs text-muted-foreground">
+                      {requestedByText(file.requestedBy)}
+                    </p>
+                  ) : null}
                   {file.modifiedTime ? (
                     <p className="text-xs text-muted-foreground">
                       Changed {formatInstant(file.modifiedTime)}

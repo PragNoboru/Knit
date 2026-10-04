@@ -67,6 +67,8 @@ export const AdminTrackers = z.object({
       ]),
       modifiedTime: z.string().nullable(),
       trackers: z.number(),
+      /** N86: who sent the file's open request; null without one (or before its migration). */
+      requestedBy: z.string().nullable().default(null),
     }),
   ),
 });

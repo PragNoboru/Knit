@@ -112,7 +112,9 @@ export class SheetError extends Error {
       | "tab_not_found"
       | "header_not_found"
       | "read_only"
-      | "api_error",
+      | "api_error"
+      /** A Google request stopped by its client's deadline (N88). */
+      | "timeout",
     /** The HTTP status of a Google answer, when there was one. */
     readonly status?: number,
   ) {

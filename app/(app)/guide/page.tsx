@@ -8,6 +8,10 @@ import { loadMyTrackerRequests } from "@/lib/tracker-request";
 
 export const metadata: Metadata = { title: "Guide · Knit" };
 
+// N88: Check and send (requestTracker) runs in this page's function. Its Google requests stop
+// 40 s after it starts, well within this limit, so it always answers. As the (app) layout's.
+export const maxDuration = 60;
+
 // PRD 12.9 (N77 to N85, N89): how to use Knit, for every signed-in user. The admin sections are
 // rendered for the admin only; the page reads nothing from the database but the template link
 // and the person's own tracker requests (N79 as amended by N83, N85).

@@ -28,7 +28,10 @@ import type { LocalDate } from "@/lib/time";
  * working-day calendar and the people aliases. Nothing is logged here but codes.
  */
 
-/** N88: the sheet reads must be done this long after the check started. */
+/**
+ * N88: the sheet reads must be done this long after the check started. The check's Google
+ * requests, discover's listing included, are stopped at the same time (jobDeps' googleDeadline).
+ */
 export const CHECK_BUDGET_MS = 40_000;
 
 /** A read that did not finish by the deadline (N88). */
@@ -92,8 +95,9 @@ const FileRow = z.object({
 
 /**
  * N84, N88: lists the folder with discover, run to its end (never raced, so its sync run is
- * always finished), then reads the file's drive_files row: a file not listed, or listed as
- * not a Google Sheet, is refused. Then the sheet's reads, raced against the deadline.
+ * always finished; a listing the source stops at the deadline finishes it as failed), then
+ * reads the file's drive_files row: a file not listed, or listed as not a Google Sheet, is
+ * refused. Then the sheet's reads, raced against the deadline.
  */
 export async function readSheetForRequest(
   fileId: string,

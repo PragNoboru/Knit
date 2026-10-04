@@ -29,12 +29,21 @@ export function isAuthorisedCron(request: Request, secret: string): boolean {
   return given.length === expected.length && timingSafeEqual(given, expected);
 }
 
-export async function jobDeps() {
+/**
+ * The store, the sheet source and the archive. `googleDeadline` (epoch ms) stops every Google
+ * request of the source at that time: a request check passes its 40 s (N88).
+ */
+export async function jobDeps(options: { googleDeadline?: number } = {}) {
   const env = getServerEnv();
   return {
     env,
     store: createSyncStore(serviceRpc()),
-    source: await sheetSourceFor(env),
+    source: await sheetSourceFor(
+      env,
+      options.googleDeadline === undefined
+        ? {}
+        : { deadline: options.googleDeadline },
+    ),
     archive: archiveFor(env),
   };
 }

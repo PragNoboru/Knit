@@ -15,6 +15,10 @@ import { SheetError } from "./types";
  *     same result when sent twice (`idempotent`: every GET, and a values write to fixed cells)
  *     is sent again. Any other (an append, a structural batchUpdate) fails at once, and its
  *     caller re-runs the whole step, which re-reads the sheet first (invariant 8).
+ *
+ * With a `deadline` (PRD N88: a request check's 40 s), nothing is sent and nothing waited for
+ * after it, a request still in flight then is abandoned, and a retry whose wait would end past
+ * it is not made: the request fails at once, so its caller can still finish its own work.
  */
 
 export const GOOGLE_SCOPES = [
@@ -38,6 +42,11 @@ export interface GoogleApiOptions {
   maxAttempts?: number;
   /** The longest total wait on 429 answers for one request. */
   rateLimitBudgetMs?: number;
+  /**
+   * The time (epoch ms) every request made through this client must be done by (N88). Without
+   * it, a request waits as long as Google and the retries above take.
+   */
+  deadline?: number;
 }
 
 export interface GoogleRequestInit {
@@ -61,7 +70,38 @@ function retryAfterMs(response: Response): number | null {
   return Number(header.trim()) * 1000;
 }
 
+/** A request stopped by the client's deadline (N88). The code is what the logs carry. */
+const pastDeadline = () =>
+  new SheetError("Google request stopped at the deadline", "timeout");
+
+/**
+ * `work` given until `deadline`: past it the signal aborts the fetch and the call rejects
+ * with a timeout. Without a deadline, `work` as it is.
+ */
+async function untilDeadline<T>(
+  deadline: number | undefined,
+  work: (signal?: AbortSignal) => Promise<T>,
+): Promise<T> {
+  if (deadline === undefined) return work();
+  const left = deadline - Date.now();
+  if (left <= 0) throw pastDeadline();
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      reject(pastDeadline());
+    }, left);
+  });
+  try {
+    return await Promise.race([work(controller.signal), timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export function createGoogleApi(options: GoogleApiOptions): GoogleApi {
+  const deadline = options.deadline;
   const fetchImpl = options.fetch ?? fetch;
   const sleep =
     options.sleep ??
@@ -92,17 +132,25 @@ export function createGoogleApi(options: GoogleApiOptions): GoogleApi {
       const idempotent = init.idempotent ?? method === "GET";
       let rateLimitWaited = 0;
       for (let attempt = 1; ; attempt += 1) {
-        const response = await fetchImpl(url, {
-          method,
-          headers: {
-            authorization: `Bearer ${await token()}`,
-            ...(init.body === undefined
-              ? {}
-              : { "content-type": "application/json" }),
-          },
-          body: init.body === undefined ? undefined : JSON.stringify(init.body),
-        });
-        if (response.ok) return (await response.json()) as T;
+        const response = await untilDeadline(deadline, async (signal) =>
+          fetchImpl(url, {
+            method,
+            headers: {
+              authorization: `Bearer ${await token()}`,
+              ...(init.body === undefined
+                ? {}
+                : { "content-type": "application/json" }),
+            },
+            body:
+              init.body === undefined ? undefined : JSON.stringify(init.body),
+            ...(signal ? { signal } : {}),
+          }),
+        );
+        if (response.ok)
+          return await untilDeadline(
+            deadline,
+            async () => (await response.json()) as T,
+          );
         if (response.status === 404) {
           throw new SheetError(
             `Not found: ${new URL(url).pathname}`,
@@ -128,12 +176,23 @@ export function createGoogleApi(options: GoogleApiOptions): GoogleApi {
           wait = backoff + Math.floor(Math.random() * backoff);
         }
 
+        // A wait that would end past the deadline is not made (N88).
+        if (
+          wait !== null &&
+          deadline !== undefined &&
+          Date.now() + wait >= deadline
+        )
+          wait = null;
+
         if (wait === null || attempt >= attempts) {
           let reason = "";
           try {
-            const body = (await response.json()) as {
-              error?: { status?: string };
-            };
+            // Past the deadline the reason is not read: the status is enough.
+            const body = await untilDeadline(
+              deadline,
+              async () =>
+                (await response.json()) as { error?: { status?: string } },
+            );
             reason = body.error?.status ?? "";
           } catch {
             reason = "";

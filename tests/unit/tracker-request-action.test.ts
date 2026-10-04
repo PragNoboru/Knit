@@ -11,6 +11,7 @@ import {
 } from "vitest";
 
 import { calendarDaysFromRules } from "@/lib/domain/calendar";
+import { GoogleSheetSource } from "@/lib/sheets/google";
 import { MemorySheetSource } from "@/lib/sheets/memory";
 import { GOOGLE_SHEET_MIME, SheetError } from "@/lib/sheets/types";
 import { loadXlsxFolder } from "@/lib/sheets/xlsx";
@@ -35,6 +36,9 @@ const fx = vi.hoisted(() => ({
   runs: [] as string[],
   discoverError: null as unknown,
   realDiscover: false,
+  /** Builds the Google source from the deadline jobDeps is given, when set. */
+  makeSource: null as null | ((deadline: number | undefined) => unknown),
+  googleDeadlines: [] as (number | undefined)[],
   source: null as unknown,
   refreshed: 0,
 }));
@@ -82,27 +86,25 @@ vi.mock("@/lib/supabase/service", () => ({
   createServiceClient: () => client("service"),
 }));
 vi.mock("@/lib/guide", () => ({ loadTemplateLink: async () => fx.template }));
-vi.mock("@/lib/sync/discover", async (importOriginal) => ({
-  discover: async (
-    deps: Parameters<typeof import("@/lib/sync/discover").discover>[0],
-  ) => {
-    // The real discover, over the fake store below and fx.source's listFolder.
-    if (fx.realDiscover) {
-      const actual =
-        await importOriginal<typeof import("@/lib/sync/discover")>();
-      return actual.discover(deps);
-    }
-    fx.runs.push("discover started");
-    if (fx.discoverError) {
-      fx.runs.push("discover finished (failed)");
-      throw fx.discoverError;
-    }
-    fx.runs.push("discover finished");
-    return {};
-  },
-}));
+vi.mock("@/lib/sync/discover", async (importOriginal) => {
+  // Loaded here, before any test runs fake timers (a module load is not a microtask).
+  const actual = await importOriginal<typeof import("@/lib/sync/discover")>();
+  return {
+    discover: async (deps: Parameters<typeof actual.discover>[0]) => {
+      // The real discover, over the fake store below and fx.source's listFolder.
+      if (fx.realDiscover) return actual.discover(deps);
+      fx.runs.push("discover started");
+      if (fx.discoverError) {
+        fx.runs.push("discover finished (failed)");
+        throw fx.discoverError;
+      }
+      fx.runs.push("discover finished");
+      return {};
+    },
+  };
+});
 vi.mock("@/lib/jobs/cron", () => ({
-  jobDeps: async () => ({
+  jobDeps: async (options: { googleDeadline?: number } = {}) => ({
     store: {
       startRun: async (job: string) => {
         fx.runs.push(`${job} started`);
@@ -123,7 +125,9 @@ vi.mock("@/lib/jobs/cron", () => ({
         aliases: [{ aliasNorm: "pragaman", userId: "u-p" }],
       }),
     },
-    source: fx.source,
+    source: fx.makeSource
+      ? fx.makeSource(options.googleDeadline)
+      : (fx.googleDeadlines.push(options.googleDeadline), fx.source),
   }),
 }));
 
@@ -208,6 +212,8 @@ beforeEach(() => {
   fx.runs = [];
   fx.discoverError = null;
   fx.realDiscover = false;
+  fx.makeSource = null;
+  fx.googleDeadlines = [];
   fx.source = googleWith();
   fx.refreshed = 0;
   log = vi.spyOn(console, "log").mockImplementation(() => undefined);
@@ -394,6 +400,51 @@ describe("Check and send (N83)", () => {
     );
     expect(fx.runs).toContain("discover finished (failed)");
     expect(rpcNames()).not.toContain("record_tracker_request");
+  });
+
+  it("gives every Google request of the check the deadline 40 s after it started", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.UTC(2026, 9, 4, 6, 0, 0));
+    await send();
+    expect(fx.googleDeadlines).toEqual([Date.UTC(2026, 9, 4, 6, 0, 40)]);
+  });
+
+  it("answers within 40 s when discover's listing overruns: discover finished its run as failed", async () => {
+    vi.useFakeTimers();
+    const signals: (AbortSignal | undefined)[] = [];
+    fx.realDiscover = true;
+    fx.makeSource = (deadline) =>
+      new GoogleSheetSource({
+        folderId: "folder-1",
+        getToken: async () => "token",
+        // Google never answers the listing.
+        fetch: (async (_input: RequestInfo | URL, init?: RequestInit) => {
+          signals.push(init?.signal ?? undefined);
+          return new Promise<Response>(() => undefined);
+        }) as typeof fetch,
+        ...(deadline === undefined ? {} : { deadline }),
+      });
+    let settled = false;
+    const pending = send();
+    void pending.then(() => (settled = true));
+    await vi.advanceTimersByTimeAsync(39_000);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect((await pending).error).toBe(
+      "Knit could not read the sheet just now. Try again in a minute.",
+    );
+    expect(signals).toHaveLength(1);
+    expect(signals[0]?.aborted).toBe(true);
+    expect(fx.runs).toEqual([
+      "discover started",
+      "failed: SheetError: Google request stopped at the deadline",
+    ]);
+    expect(rpcNames()).not.toContain("record_tracker_request");
+    expect(JSON.parse(logged().at(-1)!)).toMatchObject({
+      event: "tracker_request.checked",
+      outcome: "read_failed",
+      code: "timeout",
+    });
   });
 
   it("stops waiting for the sheet reads 40 s after it started; discover still finished", async () => {

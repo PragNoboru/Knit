@@ -160,11 +160,14 @@ async function check(
   if (claim.error) throw claim.error;
   if (claim.data !== true) return refused("limit");
 
-  // N84, N88: Google, read only.
+  // N84, N88: Google, read only. Every Google request of the check, discover's listing
+  // included, stops 40 s after the check started, so the check answers well within the
+  // Guide's maxDuration.
+  const deadline = started + CHECK_BUDGET_MS;
   const read = await readSheetForRequest(
     fileId,
-    await jobDeps(),
-    started + CHECK_BUDGET_MS,
+    await jobDeps({ googleDeadline: deadline }),
+    deadline,
   );
   if (!read.ok)
     return {

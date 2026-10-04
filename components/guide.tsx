@@ -19,6 +19,7 @@ import {
 } from "@/lib/domain/standard-template";
 import { STATUS_LABELS } from "@/lib/domain/status";
 import { WIZARD_STEPS, type WizardStep } from "@/lib/domain/wizard";
+import { formatDay } from "@/lib/time";
 
 /**
  * PRD 12.9 (N77 to N82): how to use Knit, as static text. Labels the app defines elsewhere
@@ -60,13 +61,15 @@ const step = (key: WizardStep) =>
 
 const attention = (kind: string) => ATTENTION_TITLES[kind] ?? kind;
 
+/** 12.3: an open-ended task's label on Today, as `dueLabel` writes it. */
+const OPEN_ENDED_EXAMPLE = `From ${formatDay("2026-10-30")}`;
+
 /** 12.3: what each group of Today holds, in Today's order. */
 const GROUP_TEXT: Record<GroupKey, string> = {
   spillover:
     "tasks from an earlier day that were not finished. The red badge says how often the task spilled and its first due date.",
   due: "tasks due today.",
-  ongoing:
-    "tasks that run over several days, between their first and last day, and open-ended tasks (From 30 Oct). On its last day a task moves to Due today.",
+  ongoing: `tasks that run over several days, between their first and last day, and open-ended tasks (${OPEN_ENDED_EXAMPLE}). On its due date (its last working day) a task moves to Due today.`,
   pulled_forward: "later tasks you set to In Progress to start them early.",
   blocked: "today's blocked tasks, with their reason.",
   done: "today's done and cancelled tasks, and tasks finished early today (tagged early). It starts folded; press it to open.",
@@ -91,6 +94,11 @@ const USER_STATUS_ORDER: readonly UserStatus[] = [
   "done",
   "cancelled",
 ];
+
+/** N81: the template's five Status words, as the sheet spells them (not Knit's labels). */
+const SHEET_STATUS_WORDS = USER_STATUS_ORDER.map(
+  (s) => KNIT_STANDARD_V2.statusWords[s],
+).join(", ");
 
 function TemplateLinkLine({ isAdmin, template }: GuideProps) {
   if (template)
@@ -152,8 +160,9 @@ const EVERYONE: readonly GuideSection[] = [
         <p>
           In each group critical tasks (a flame) come first, then by due date.
           Each row shows its tracker, its due date, its status and{" "}
-          <L>Open in sheet</L>, which opens the task&apos;s row. Narrow the list
-          with <L>Trackers</L> and <L>Status</L> at the top.
+          <L>Open in sheet</L> (the arrow icon), which opens the task&apos;s
+          row. Narrow the list with <L>Trackers</L> and <L>Status</L> at the
+          top.
         </p>
         <p>
           Banners at the top say when a tracker is paused (Knit then shows its
@@ -180,10 +189,12 @@ const EVERYONE: readonly GuideSection[] = [
         </p>
         <List>
           <li>green: every task that day was done or cancelled;</li>
-          <li>red: a closed day with a task not done;</li>
           <li>
-            amber: today or a later day with open work, or an earlier day still
-            open;
+            red: a closed day with a task marked {STATUS_LABELS.not_done};
+          </li>
+          <li>
+            amber: today or a later day with open work, or an earlier day not
+            closed yet or holding a {STATUS_LABELS.blocked} task;
           </li>
           <li>
             grey stripes: a day off (point at it to see why: Sunday, 2nd
@@ -249,8 +260,9 @@ const EVERYONE: readonly GuideSection[] = [
           cell, sets Done on when you mark it Done (and clears it when you
           change it back), and updates the Knit Note. A small <L>Syncing</L>{" "}
           pill shows until the change is in the sheet, usually within seconds.
-          If it cannot be written the pill turns amber,{" "}
-          <L>Not saved to sheet</L>: Knit keeps trying and the admin sees why.
+          If Knit cannot write it after several tries, the pill turns amber,{" "}
+          <L>Not saved to sheet</L>, and the admin sees why in Needs Attention
+          and can retry it.
         </p>
         <p>
           A change made in the sheet reaches Knit within 10 minutes, or at once
@@ -345,9 +357,9 @@ const EVERYONE: readonly GuideSection[] = [
     body: () => (
       <p>
         <L>Sync now</L> in the top bar reads your trackers again at once, so a
-        change made in the sheet shows without waiting up to 10 minutes. It runs
-        once every 30 seconds for each person, and says &quot;Up to date.&quot;
-        when it is done.
+        change made in the sheet shows without waiting up to 10 minutes. You can
+        press it once every 30 seconds. It says &quot;Up to date.&quot; when it
+        is done.
       </p>
     ),
   },
@@ -394,16 +406,18 @@ const EVERYONE: readonly GuideSection[] = [
           </li>
           <li>
             Fill the Tasks tab in the template&apos;s format (its Guide tab
-            explains it): one task per row, a real date in Date, one of the five
-            Status words, each name spelt the same way every time. Keep row 1 as
-            it is.
+            explains it): one task per row, a real date in Date, Status picked
+            from its dropdown ({SHEET_STATUS_WORDS}), each name spelt the same
+            way every time. Keep row 1 as it is.
           </li>
           <li>
-            Move the sheet into the Knit folder, or ask the admin to move it.
+            Share the sheet with the admin and tell them. The admin moves it
+            into the Knit folder (or move it yourself, if you can edit that
+            folder).
           </li>
           <li>
-            Tell the admin. Once they connect it, its tasks reach the Today of
-            the people named in it.
+            The admin connects it. Its tasks then reach the Today of the people
+            named in it.
           </li>
         </Steps>
         <p>
@@ -507,7 +521,9 @@ const ADMIN: readonly GuideSection[] = [
             A name marked Not a Knit user can become a person: create their
             login with that name in Name in trackers. Knit links the name to
             them and reads the trackers again; from then on (at once, or within
-            10 minutes) their tasks reach their Today, with their history.
+            10 minutes) their tasks reach their Today, with their history. If
+            the name is already linked to someone else, it moves to the new
+            person, and so do its tasks.
           </li>
           <li>
             <L>Names in trackers</L> links a name to an existing person, or
@@ -554,12 +570,14 @@ const ADMIN: readonly GuideSection[] = [
             last good dates.
           </li>
           <li>
-            <L>{attention("conflict")}</L>: both changed; Knit kept its own
+            <L>{attention("conflict")}</L>: the sheet shows a different status
+            from Knit (both were changed, the check at the day&apos;s close
+            found it, or the sheet reopened a finished task); Knit kept its own
             status.
           </li>
           <li>
-            <L>{attention("missing_header")}</L>: the tracker is paused until
-            the column is back.
+            <L>{attention("missing_header")}</L>: the tracker is paused; put the
+            column back, then press <L>Resume</L> on the tracker&apos;s page.
           </li>
           <li>
             <L>{attention("member_report")}</L>: correct the day if it is wrong.
@@ -623,10 +641,12 @@ const ADMIN: readonly GuideSection[] = [
         </p>
         <p>
           Knit pauses a tracker itself when a column it reads is renamed or
-          deleted, when the Knit ID or Knit Note column is missing, or when the
-          sheet leaves the Knit folder. Put it right in the sheet (File &gt;
-          Version history helps), then Resume. For a lost Knit ID column, the
-          tracker&apos;s page also offers <L>Recreate the Knit ID column</L>.
+          deleted or appears twice, when the Knit ID or Knit Note column is
+          missing, when a column Knit writes (Status, Done on, Knit ID, Knit
+          Note) starts holding formulas, or when the sheet leaves the Knit
+          folder. Put it right in the sheet (File &gt; Version history helps),
+          then Resume. For a lost Knit ID column, the tracker&apos;s page also
+          offers <L>Recreate the Knit ID column</L>.
         </p>
       </>
     ),
@@ -669,10 +689,14 @@ const ADMIN: readonly GuideSection[] = [
         </p>
         <List>
           <li>
-            Never rename, delete, double or reorder a header, or insert a column
-            between them. Knit finds columns by these names and reads all of
-            them, so changing one pauses the tracker until it is put back and
-            resumed.
+            Never rename, delete or double a header. Knit finds columns by these
+            names and reads all of them, so changing one pauses the tracker
+            until it is put back and resumed.
+          </li>
+          <li>
+            Keep them in this order with no column between them: that is how{" "}
+            <L>{STANDARD_BUTTON}</L> recognises the template at setup. Moving a
+            column of a connected tracker does not pause it.
           </li>
           <li>
             Brand columns go after Notes. Knit adds Knit Note and the hidden
@@ -683,11 +707,8 @@ const ADMIN: readonly GuideSection[] = [
             of several days; leave it blank for a one-day task.
           </li>
           <li>
-            Status uses its five words:{" "}
-            {USER_STATUS_ORDER.map((s) => KNIT_STANDARD_V2.statusWords[s]).join(
-              ", ",
-            )}
-            . Priority High marks a task critical.
+            Status uses its five words: {SHEET_STATUS_WORDS}. Priority High
+            marks a task critical.
           </li>
           <li>
             Spell each name the same way in Owner and Maker. A task that is not
@@ -707,6 +728,19 @@ const ADMIN: readonly GuideSection[] = [
           <L>{TEMPLATE_LINK_COPY.get}</L> under Add a new tracker, which opens
           Google&apos;s page to make their own copy.
         </p>
+        <List>
+          <li>
+            Share the blank template so everyone can view it (Share &gt; General
+            access, for example anyone at Noboru with the link, as Viewer).
+            Google shows the copy page only to people who can view the file.
+          </li>
+          <li>
+            Keep the template outside the Knit folder, or press <L>Ignore</L>{" "}
+            when it is listed under <L>New sheet found</L>. Never connect it:
+            Knit would add its Knit ID and Knit Note columns, and every copy
+            would carry them.
+          </li>
+        </List>
         <ActionForm
           action={saveTemplateLink}
           submitLabel={TEMPLATE_LINK_COPY.submit}

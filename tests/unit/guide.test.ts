@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ATTENTION_TITLES } from "@/lib/domain/attention";
+import { dueLabel, type TaskCard } from "@/lib/domain/cards";
 import { GROUP_ORDER, TODAY_TITLES } from "@/lib/domain/day-view";
 import {
   parseTemplateLink,
@@ -61,6 +62,10 @@ const LINK: TemplateLink = {
   url: SHEET,
   copyUrl: `${SHEET}/copy`,
 };
+
+/** Only the fields `dueLabel` reads: an open-ended task from `start`. */
+const openEnded = (start: string) =>
+  ({ dueDate: null, plannedStart: start, plannedEnd: null }) as TaskCard;
 
 const render = (isAdmin: boolean, template: TemplateLink | null = null) =>
   renderToStaticMarkup(createElement(Guide, { isAdmin, template }));
@@ -306,5 +311,89 @@ describe("loadTemplateLink (N80)", () => {
     } finally {
       log.mockRestore();
     }
+  });
+});
+
+describe("what the Guide says matches the app (N79, N80, N81)", () => {
+  it("writes an open-ended task's label as Today shows it", () => {
+    const shown = text(render(false));
+    expect(shown).toContain(
+      `open-ended tasks (${dueLabel(openEnded("2026-10-30"))})`,
+    );
+    expect(shown).toContain("(From Fri 30 Oct)");
+    expect(shown).toContain(
+      "On its due date (its last working day) a task moves to Due today.",
+    );
+  });
+
+  it("lists the template's Status words for everyone, as the sheet spells them", () => {
+    const shown = text(render(false));
+    const words = [
+      "yet_to_start",
+      "in_progress",
+      "blocked",
+      "done",
+      "cancelled",
+    ]
+      .map(
+        (s) =>
+          KNIT_STANDARD_V2.statusWords[
+            s as keyof typeof KNIT_STANDARD_V2.statusWords
+          ],
+      )
+      .join(", ");
+    expect(words).toBe("Not started, In progress, Blocked, Done, Cancelled");
+    expect(shown).toContain(`Status picked from its dropdown (${words})`);
+    expect(shown).toContain(
+      "Share the sheet with the admin and tell them. The admin moves it into the Knit folder",
+    );
+  });
+
+  it("says when the pill turns amber, and what Sync now allows", () => {
+    const shown = text(render(false));
+    expect(shown).toContain(
+      "If Knit cannot write it after several tries, the pill turns amber, Not saved to sheet, and the admin sees why in Needs Attention and can retry it.",
+    );
+    expect(shown).not.toContain("Knit keeps trying");
+    expect(shown).toContain("You can press it once every 30 seconds.");
+  });
+
+  it("colours a closed day with a Blocked task amber, and only Not Done red", () => {
+    const shown = text(render(false));
+    expect(shown).toContain("red: a closed day with a task marked Not Done;");
+    expect(shown).toContain(
+      "an earlier day not closed yet or holding a Blocked task;",
+    );
+  });
+
+  it("tells the admin to share the template, keep it out of the Knit folder and never connect it", () => {
+    const shown = text(render(true));
+    expect(shown).toContain("Share the blank template so everyone can view it");
+    expect(shown).toContain("Keep the template outside the Knit folder");
+    expect(shown).toContain("Never connect it");
+    expect(TEMPLATE_LINK_COPY.hint).toContain("shared so everyone can view it");
+    expect(shown).toContain(TEMPLATE_LINK_COPY.hint);
+  });
+
+  it("pauses only for a renamed, deleted or doubled header, never for a moved one", () => {
+    const shown = text(render(true));
+    expect(shown).not.toContain("reorder");
+    expect(shown).toContain("Never rename, delete or double a header.");
+    expect(shown).toContain(
+      "Moving a column of a connected tracker does not pause it.",
+    );
+    expect(shown).toContain("appears twice");
+    expect(shown).toContain("starts holding formulas");
+  });
+
+  it("says Resume is pressed after a missing column is back, and when a conflict is raised", () => {
+    const shown = text(render(true));
+    expect(shown).toContain(
+      "Column missing: the tracker is paused; put the column back, then press Resume",
+    );
+    expect(shown).toContain("or the sheet reopened a finished task");
+    expect(shown).toContain(
+      "If the name is already linked to someone else, it moves to the new person, and so do its tasks.",
+    );
   });
 });

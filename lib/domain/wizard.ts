@@ -1,6 +1,10 @@
 import { z } from "zod";
 
-import { KNIT_ID_HEADER, KNIT_NOTE_HEADER } from "@/lib/sheets/types";
+import {
+  KNIT_ID_HEADER,
+  KNIT_NOTE_HEADER,
+  type TabStructure,
+} from "@/lib/sheets/types";
 import {
   addDays,
   formatDate,
@@ -212,6 +216,22 @@ export const CHECKER_NEEDS_OWNER =
 
 export const endDateWarning = (rate: DateParseRate) =>
   `Only ${Math.round(rate.rate * 100)}% of the filled End dates can be read with their Date. Knit cannot read: ${rate.failing.join(", ")}.`;
+
+/**
+ * 11 steps 3 to 5: the wizard's view of a header row: blank headers and Knit's own columns left
+ * out. Shared by the setup's reads (lib/admin/data.ts) and the request's dry run (N84).
+ */
+export function wizardStructure(structure: TabStructure): TabStructure {
+  return {
+    ...structure,
+    headers: structure.headers.filter(
+      (h) =>
+        h.header.trim() !== "" &&
+        h.normalised !== KNIT_ID_HEADER.toLowerCase() &&
+        h.normalised !== "knit note",
+    ),
+  };
+}
 
 export interface StatusChoice {
   /** Normalised word, the statusMap key ("" for a blank cell). */

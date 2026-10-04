@@ -12,11 +12,15 @@ import {
   type TemplateLink,
 } from "@/lib/domain/guide";
 import { KNIT_STANDARD_V2 } from "@/lib/domain/standard-template";
+import {
+  REQUEST_COPY,
+  type MyTrackerRequest,
+} from "@/lib/domain/tracker-request";
 import { STATUS_LABELS } from "@/lib/domain/status";
 import { WIZARD_STEPS } from "@/lib/domain/wizard";
 
-// PRD 12.9 (N77 to N82): the Guide. The template link rules, and what a member's and the
-// admin's Guide hold.
+// PRD 12.9 (N77 to N85, N89): the Guide. The template link rules, and what a member's and the
+// admin's Guide hold, the form to send a sheet to the admin and the person's own requests.
 
 const fx = vi.hoisted(() => ({
   user: null as unknown,
@@ -26,9 +30,15 @@ const fx = vi.hoisted(() => ({
     error: { code: string } | null;
   },
   reads: [] as unknown[][],
+  requests: { data: [], error: null } as {
+    data: unknown;
+    error: { code: string } | null;
+  },
+  requestReads: [] as unknown[][],
 }));
 
 vi.mock("@/lib/actions/admin", () => ({ saveTemplateLink: vi.fn() }));
+vi.mock("@/lib/actions/tracker-requests", () => ({ requestTracker: vi.fn() }));
 vi.mock("next/navigation", () => ({
   redirect: (to: string) => {
     throw new Error(`redirect:${to}`);
@@ -36,6 +46,20 @@ vi.mock("next/navigation", () => ({
 }));
 vi.mock("@/lib/supabase/server", () => ({
   getCurrentUser: async () => fx.user,
+  // N85: the person's own requests, read with their own session.
+  getSupabase: async () => ({
+    from: (table: string) => {
+      const read: unknown[] = [table];
+      fx.requestReads.push(read);
+      const chain = {
+        select: (columns: string) => (read.push(columns), chain),
+        eq: (...filter: unknown[]) => (read.push(filter), chain),
+        order: (...order: unknown[]) => (read.push(order), chain),
+        limit: async (n: number) => (read.push(n), fx.requests),
+      };
+      return chain;
+    },
+  }),
 }));
 vi.mock("@/lib/supabase/service", () => ({
   createServiceClient: () => ({
@@ -67,8 +91,12 @@ const LINK: TemplateLink = {
 const openEnded = (start: string) =>
   ({ dueDate: null, plannedStart: start, plannedEnd: null }) as TaskCard;
 
-const render = (isAdmin: boolean, template: TemplateLink | null = null) =>
-  renderToStaticMarkup(createElement(Guide, { isAdmin, template }));
+const render = (
+  isAdmin: boolean,
+  template: TemplateLink | null = null,
+  requests: MyTrackerRequest[] = [],
+) =>
+  renderToStaticMarkup(createElement(Guide, { isAdmin, template, requests }));
 
 /** The section headings, and the contents list's links. */
 const headings = (html: string) =>
@@ -105,6 +133,8 @@ beforeEach(() => {
   fx.template = null;
   fx.settings = { data: null, error: null };
   fx.reads = [];
+  fx.requests = { data: [], error: null };
+  fx.requestReads = [];
 });
 
 describe("the template link (N80)", () => {
@@ -161,8 +191,10 @@ describe("a member's Guide (N77)", () => {
     for (const title of ADMIN_TITLES)
       expect(headings(html)).not.toContain(title);
     expect(text(html)).not.toContain("For the admin");
-    expect(html).not.toContain("<form");
-    expect(html).not.toContain('name="url"');
+    // Only the form to send a sheet (N83); never the template link form (N80).
+    expect(html.match(/<form/g)).toHaveLength(1);
+    expect(html).toContain('aria-label="Send a sheet to the admin"');
+    expect(html).not.toContain('id="template-url"');
     expect(html).not.toContain(TEMPLATE_LINK_COPY.label);
     for (const title of [
       "What Knit is",
@@ -345,7 +377,10 @@ describe("what the Guide says matches the app (N79, N80, N81)", () => {
     expect(words).toBe("Not started, In progress, Blocked, Done, Cancelled");
     expect(shown).toContain(`Status picked from its dropdown (${words})`);
     expect(shown).toContain(
-      "Share the sheet with the admin and tell them. The admin moves it into the Knit folder",
+      "Get the sheet into the Knit folder: move it there yourself if you can edit that folder (into the folder itself, not a folder inside it, and not as a shortcut), or share it with the admin and ask them to move it.",
+    );
+    expect(shown).toContain(
+      "Then paste its link below and press Check and send.",
     );
   });
 
@@ -395,5 +430,121 @@ describe("what the Guide says matches the app (N79, N80, N81)", () => {
     expect(shown).toContain(
       "If the name is already linked to someone else, it moves to the new person, and so do its tasks.",
     );
+  });
+});
+
+describe("sending a sheet to the admin (N83, N85, N89)", () => {
+  const REQUESTS: MyTrackerRequest[] = [
+    {
+      id: 3,
+      fileName: "Brand Zeta",
+      state: "open",
+      dismissReason: null,
+      createdAt: "2026-10-04T20:00:00Z",
+    },
+    {
+      id: 2,
+      fileName: "Brand Eta",
+      state: "connected",
+      dismissReason: null,
+      createdAt: "2026-10-02T05:00:00Z",
+    },
+    {
+      id: 1,
+      fileName: "Brand Theta",
+      state: "dismissed",
+      dismissReason: "Use the Sapiens tracker",
+      createdAt: "2026-10-01T05:00:00Z",
+    },
+  ];
+
+  it("a member and the admin both get the form and their requests", () => {
+    for (const isAdmin of [false, true]) {
+      const shown = text(render(isAdmin, LINK, REQUESTS));
+      for (const copy of [
+        "Send a sheet to the admin",
+        "Link to your sheet",
+        REQUEST_COPY.linkHint,
+        "Note for the admin (optional)",
+        REQUEST_COPY.noteHint,
+        "Check and send",
+        "Your requests",
+        "Brand Zeta · sent Mon 5 Oct",
+        "Waiting for the admin",
+        "Brand Eta · sent Fri 2 Oct",
+        "Connected",
+        "Not taken: Use the Sapiens tracker",
+        "The admin makes every login and sets every password. To change yours, ask the admin.",
+      ])
+        expect(shown, copy).toContain(copy);
+    }
+    const member = render(false, LINK, REQUESTS);
+    for (const title of ADMIN_TITLES)
+      expect(headings(member)).not.toContain(title);
+    expect(text(member)).not.toContain("For the admin");
+  });
+
+  it("leaves Your requests out until the person has one", () => {
+    const shown = text(render(false, LINK));
+    expect(shown).toContain("Send a sheet to the admin");
+    expect(shown).not.toContain("Your requests");
+  });
+
+  it("tells the admin how a requested sheet reaches Needs Attention", () => {
+    const shown = text(render(true));
+    expect(ATTENTION_TITLES.tracker_request).toBe("New tracker requested");
+    expect(shown).toContain(
+      "A person can also send a sheet from Add a new tracker. Knit checks it first, then adds New tracker requested to Needs Attention, with Set up. Activating the tracker closes the item; Dismiss asks for a reason, which the person sees.",
+    );
+    expect(text(render(false))).not.toContain(
+      "A person can also send a sheet from Add a new tracker.",
+    );
+  });
+
+  it("the page reads the person's own last 10 requests, newest first", async () => {
+    fx.user = { id: "u-7", name: "Asha", email: "a@knit.test", isAdmin: false };
+    fx.requests = {
+      data: [
+        {
+          id: 3,
+          file_name: "Brand Zeta",
+          state: "dismissed",
+          dismiss_reason: "Not ours",
+          created_at: "2026-10-04T06:00:00Z",
+        },
+      ],
+      error: null,
+    };
+    const { default: GuidePage } = await import("@/app/(app)/guide/page");
+    const shown = text(renderToStaticMarkup(await GuidePage()));
+    expect(shown).toContain("Brand Zeta · sent Sun 4 Oct");
+    expect(shown).toContain("Not taken: Not ours");
+    expect(fx.requestReads).toEqual([
+      [
+        "tracker_requests",
+        "id, file_name, state, dismiss_reason, created_at",
+        ["requested_by", "u-7"],
+        ["created_at", { ascending: false }],
+        10,
+      ],
+    ]);
+  });
+
+  it("still opens the Guide when the requests cannot be read, logging only the code", async () => {
+    fx.user = { id: "u-7", name: "Asha", email: "a@knit.test", isAdmin: false };
+    fx.requests = { data: null, error: { code: "PGRST000" } };
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    try {
+      const { default: GuidePage } = await import("@/app/(app)/guide/page");
+      const shown = text(renderToStaticMarkup(await GuidePage()));
+      expect(shown).toContain("Send a sheet to the admin");
+      expect(shown).not.toContain("Your requests");
+      expect(JSON.parse(String(log.mock.calls[0]![0]))).toMatchObject({
+        event: "guide.tracker_requests_read_failed",
+        code: "PGRST000",
+      });
+    } finally {
+      log.mockRestore();
+    }
   });
 });

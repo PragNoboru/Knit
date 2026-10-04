@@ -15,13 +15,10 @@ import {
   goLiveSaved,
   statusChoices,
   unmappedChoices,
+  wizardStructure,
 } from "@/lib/domain/wizard";
 import { jobDeps } from "@/lib/jobs/cron";
-import {
-  KNIT_ID_HEADER,
-  type TabRef,
-  type TabStructure,
-} from "@/lib/sheets/types";
+import { KNIT_ID_HEADER, type TabRef } from "@/lib/sheets/types";
 import { callRpc, getSupabase } from "@/lib/supabase/server";
 import type { LocalDate } from "@/lib/time";
 
@@ -170,19 +167,6 @@ export const loadTopRows = cache(async (ref: TabRef) => {
   const { source } = await loadSheetDeps();
   return source.readTopRows(ref, 10);
 });
-
-/** The wizard's view of a header row: blank headers and Knit's own columns left out. */
-function wizardStructure(structure: TabStructure): TabStructure {
-  return {
-    ...structure,
-    headers: structure.headers.filter(
-      (h) =>
-        h.header.trim() !== "" &&
-        h.normalised !== KNIT_ID_HEADER.toLowerCase() &&
-        h.normalised !== "knit note",
-    ),
-  };
-}
 
 /**
  * 11 step 3 (N68): headers, formula columns and dropdowns of a header row, without the data

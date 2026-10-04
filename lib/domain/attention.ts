@@ -2,6 +2,7 @@ import { formatDay, isLocalDate } from "@/lib/time";
 
 import { KNIT_STATUSES, type KnitStatus } from "./config";
 import { STATUS_LABELS } from "./status";
+import { templateName } from "./tracker-request";
 
 /**
  * PRD 12.8 Needs Attention: each item says what happened and where. The kinds are the ones
@@ -24,6 +25,8 @@ export const ATTENTION_TITLES: Record<string, string> = {
   member_report: "Report from a member",
   calendar_ending: "Calendar ending",
   write_misplaced: "Write may be on the wrong row",
+  // N86: a person sent a sheet from the Guide (N83).
+  tracker_request: "New tracker requested",
 };
 
 /** Why a date in the sheet cannot be used (6.3.1, 6.6). */
@@ -78,6 +81,28 @@ function describeBadDate(detail: Record<string, unknown>): string {
   }
 }
 
+/**
+ * N86, 12.8: a tracker_request item. "{name} asks to connect "{sheet}": {n} tasks, in the
+ * {template} layout.", then how many names Knit does not know, then the note.
+ */
+function describeTrackerRequest(
+  detail: Record<string, unknown>,
+  reporter: string | null,
+): string {
+  const count = Number(detail.taskCount);
+  const tasks = count === 1 ? "1 task" : `${str(detail.taskCount)} tasks`;
+  const parts = [
+    `${reporter ?? "Someone"} asks to connect "${str(detail.fileName)}": ${tasks}, in the ${templateName(str(detail.templateId))} layout.`,
+  ];
+  const unknown = Number(detail.unknownNames);
+  if (unknown === 1) parts.push("1 name in it is not known to Knit yet.");
+  else if (Number.isInteger(unknown) && unknown > 1)
+    parts.push(`${unknown} names in it are not known to Knit yet.`);
+  const note = str(detail.note);
+  if (note !== "") parts.push(`Note: "${note}"`);
+  return parts.join(" ");
+}
+
 /** One sentence for an item. */
 export function describeAttention(
   kind: string,
@@ -123,6 +148,8 @@ export function describeAttention(
       if (detail.reason === "unverified")
         return `Knit wrote to rows ${Array.isArray(detail.rows) ? detail.rows.map(str).join(", ") : ""} but could not read them back to check. If rows were moved just then, check those rows.`;
       return `Rows moved while Knit was writing, so row ${str(detail.row)} got values meant for another task (${Array.isArray(detail.headers) ? detail.headers.map(str).join(", ") : ""}). Knit could not undo them: check that row.`;
+    case "tracker_request":
+      return describeTrackerRequest(detail, reporter);
     default:
       return kind;
   }

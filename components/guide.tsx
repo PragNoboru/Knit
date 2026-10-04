@@ -2,6 +2,7 @@ import { ExternalLink } from "lucide-react";
 
 import { ActionForm } from "@/components/admin/action-form";
 import { Field, TextInput } from "@/components/admin/fields";
+import { TrackerRequestForm } from "@/components/tracker-request-form";
 import { buttonVariants } from "@/components/ui/button";
 import { saveTemplateLink } from "@/lib/actions/admin";
 import { ATTENTION_TITLES } from "@/lib/domain/attention";
@@ -18,21 +19,30 @@ import {
   standardHeading,
 } from "@/lib/domain/standard-template";
 import { STATUS_LABELS } from "@/lib/domain/status";
+import {
+  REQUEST_COPY,
+  requestLine,
+  requestStateText,
+  type MyTrackerRequest,
+} from "@/lib/domain/tracker-request";
 import { WIZARD_STEPS, type WizardStep } from "@/lib/domain/wizard";
 import { formatDay } from "@/lib/time";
 
 /**
- * PRD 12.9 (N77 to N82): how to use Knit, as static text. Labels the app defines elsewhere
+ * PRD 12.9 (N77 to N85, N89): how to use Knit, as static text. Labels the app defines elsewhere
  * (status labels, Today's groups, wizard steps, Needs Attention titles, the template's headers)
  * are read from the modules that define them, so the Guide cannot drift from the screens (N79).
  * The admin sections are rendered only when `isAdmin`, on the server: a member's page never
- * holds them (N77).
+ * holds them (N77). Add a new tracker also holds the form "Send a sheet to the admin" and the
+ * person's own requests (N83, N85).
  */
 
 interface GuideProps {
   isAdmin: boolean;
   /** N80: the saved template link, or null when none is saved. */
   template: TemplateLink | null;
+  /** N85: the signed-in person's own last requests, newest first. */
+  requests?: readonly MyTrackerRequest[];
 }
 
 interface GuideSection {
@@ -120,6 +130,33 @@ function TemplateLinkLine({ isAdmin, template }: GuideProps) {
   );
 }
 
+/** N85: the person's own requests, newest first, with where each one stands. */
+function YourRequests({ requests }: { requests: readonly MyTrackerRequest[] }) {
+  if (requests.length === 0) return null;
+  return (
+    <section aria-labelledby="your-requests" className="grid gap-2">
+      <h3 id="your-requests" className="text-sm font-semibold text-foreground">
+        {REQUEST_COPY.yourRequests}
+      </h3>
+      <ul className="flex flex-col divide-y rounded-lg border">
+        {requests.map((request) => (
+          <li
+            key={request.id}
+            className="flex flex-wrap justify-between gap-x-3 gap-y-0.5 px-3 py-2"
+          >
+            <span className="text-foreground">
+              {requestLine(request.fileName, request.createdAt)}
+            </span>
+            <span>
+              {requestStateText(request.state, request.dismissReason)}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 const EVERYONE: readonly GuideSection[] = [
   {
     id: "what-knit-is",
@@ -136,6 +173,7 @@ const EVERYONE: readonly GuideSection[] = [
           Tasks are planned in the sheets. Titles, dates and people are changed
           there, never in Knit. You see the tasks assigned to you.
         </p>
+        <p>{REQUEST_COPY.passwords}</p>
       </>
     ),
   },
@@ -410,21 +448,19 @@ const EVERYONE: readonly GuideSection[] = [
             from its dropdown ({SHEET_STATUS_WORDS}), each name spelt the same
             way every time. Keep row 1 as it is.
           </li>
-          <li>
-            Share the sheet with the admin and tell them. The admin moves it
-            into the Knit folder (or move it yourself, if you can edit that
-            folder).
-          </li>
-          <li>
-            The admin connects it. Its tasks then reach the Today of the people
-            named in it.
-          </li>
+          <li>{REQUEST_COPY.folderStep}</li>
+          <li>{REQUEST_COPY.sendStep}</li>
         </Steps>
         <p>
           Never start from a copy of a tracker that is already in Knit: its
           hidden Knit IDs would come along. Always start from the template.
         </p>
         <TemplateLinkLine {...props} />
+        <h3 className="mt-2 text-sm font-semibold text-foreground">
+          {REQUEST_COPY.heading}
+        </h3>
+        <TrackerRequestForm />
+        <YourRequests requests={props.requests ?? []} />
       </>
     ),
   },
@@ -474,6 +510,12 @@ const ADMIN: readonly GuideSection[] = [
         <p>
           <L>Set up another tab</L> connects a second tab of the same
           spreadsheet as its own tracker.
+        </p>
+        <p>
+          A person can also send a sheet from Add a new tracker. Knit checks it
+          first, then adds {attention("tracker_request")} to Needs Attention,
+          with <L>Set up</L>. Activating the tracker closes the item;{" "}
+          <L>Dismiss</L> asks for a reason, which the person sees.
         </p>
       </>
     ),

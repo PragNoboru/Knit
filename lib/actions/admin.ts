@@ -22,6 +22,11 @@ import {
   type UserStatus,
 } from "@/lib/domain/config";
 import {
+  parseTemplateLink,
+  TEMPLATE_LINK_COPY,
+  TEMPLATE_LINK_KEY,
+} from "@/lib/domain/guide";
+import {
   matchStandardTemplate,
   STANDARD_NOT_DRAFT,
   STANDARD_TEMPLATE_IDS,
@@ -1394,6 +1399,40 @@ export async function removeHoliday(day: string): Promise<FormState> {
   pullLater();
   refresh();
   return { error: null };
+}
+
+// ---------------------------------------------------------------------------------------
+// Guide (12.9): the tracker template link
+
+/**
+ * N80: saves the link to the blank tracker template, kept as
+ * https://docs.google.com/spreadsheets/d/{id} in settings.tracker_template_url, or removes it
+ * when the field is empty. Only a Google Sheets link is taken. The link is never logged.
+ */
+export async function saveTemplateLink(
+  _previous: FormState,
+  form: FormData,
+): Promise<FormState> {
+  const denied = await adminRefusal();
+  if (denied) return denied;
+  const input = String(form.get("url") ?? "").trim();
+  if (input === "") {
+    const { error } = await createServiceClient()
+      .from("settings")
+      .delete()
+      .eq("key", TEMPLATE_LINK_KEY);
+    if (error) return { error: TEMPLATE_LINK_COPY.failed };
+    refresh();
+    return { error: null, notice: TEMPLATE_LINK_COPY.removed };
+  }
+  const link = parseTemplateLink(input);
+  if (!link) return { error: TEMPLATE_LINK_COPY.invalid };
+  const { error } = await createServiceClient()
+    .from("settings")
+    .upsert({ key: TEMPLATE_LINK_KEY, value: link.url }, { onConflict: "key" });
+  if (error) return { error: TEMPLATE_LINK_COPY.failed };
+  refresh();
+  return { error: null, notice: TEMPLATE_LINK_COPY.saved };
 }
 
 /** 6.2: extend the working-day calendar by a year. */

@@ -1178,3 +1178,107 @@ describe("Use the standard setup (11.1, N68, N69)", () => {
     ).rejects.toThrow(/redirect:.*saved=1$/);
   });
 });
+
+describe("a name given a login (N82)", () => {
+  it("creating a user with a Name in trackers links that name to them and pulls again", async () => {
+    const form = new FormData();
+    form.set("name", "Shlok");
+    form.set("email", "shlok@knit.test");
+    form.set("role", "member");
+    form.set("password", "a-long-test-password");
+    form.set("alias", " Shlok ");
+    expect(await actions.createUser({ error: null }, form)).toEqual({
+      error: null,
+      notice: "Created shlok@knit.test.",
+    });
+    // An upsert on the normalised name: a name marked Not a Knit user (user_id null) is
+    // pointed at the new person.
+    const alias = fx.calls.find(
+      (c) => c.table === "people_aliases" && c.op === "upsert",
+    );
+    expect(alias?.payload).toEqual({
+      alias_norm: "shlok",
+      display: "Shlok",
+      user_id: "00000000-0000-4000-8000-0000000000aa",
+    });
+    // The forced pull of every tracker that moves the name's tasks to them.
+    expect(fx.after).toHaveLength(1);
+  });
+});
+
+describe("the tracker template link (12.9, N80)", () => {
+  const VALID =
+    "https://docs.google.com/spreadsheets/d/1TemplateExampleId_abcdefghijklmnopqrstuvwx/edit#gid=0";
+  const linkForm = (url: string) => {
+    const form = new FormData();
+    form.set("url", url);
+    return form;
+  };
+  const settingsCalls = () => fx.calls.filter((c) => c.table === "settings");
+
+  it("is refused for a member and for a caller whose session ended, writing nothing", async () => {
+    fx.user = { ...ADMIN, isAdmin: false };
+    expect(
+      await actions.saveTemplateLink({ error: null }, linkForm(VALID)),
+    ).toEqual({ error: "Only the admin can do this." });
+    fx.user = null;
+    expect(
+      await actions.saveTemplateLink({ error: null }, linkForm(VALID)),
+    ).toEqual({ error: "Your session has ended. Sign in again." });
+    expect(fx.calls).toEqual([]);
+  });
+
+  it("refuses a link that is not a Google Sheet, writing nothing", async () => {
+    for (const url of [
+      "https://example.com/spreadsheets/d/1TemplateExampleId_abcdefghijklmnopqrstuvwx",
+      "https://docs.google.com/document/d/1TemplateExampleId_abcdefghijklmnopqrstuvwx/edit",
+      "http://docs.google.com/spreadsheets/d/1TemplateExampleId_abcdefghijklmnopqrstuvwx",
+      "not a link",
+    ])
+      expect(
+        await actions.saveTemplateLink({ error: null }, linkForm(url)),
+      ).toEqual({
+        error:
+          "Paste the link of a Google Sheet. It starts with https://docs.google.com/spreadsheets/d/",
+      });
+    expect(fx.calls).toEqual([]);
+  });
+
+  it("saves a Google Sheets link as the sheet's plain link, with the service role", async () => {
+    expect(
+      await actions.saveTemplateLink({ error: null }, linkForm(` ${VALID} `)),
+    ).toEqual({ error: null, notice: "Link saved." });
+    expect(settingsCalls()).toEqual([
+      {
+        table: "settings",
+        op: "upsert",
+        payload: {
+          key: "tracker_template_url",
+          value:
+            "https://docs.google.com/spreadsheets/d/1TemplateExampleId_abcdefghijklmnopqrstuvwx",
+        },
+        filters: [],
+      },
+    ]);
+  });
+
+  it("an empty field removes the link", async () => {
+    expect(
+      await actions.saveTemplateLink({ error: null }, linkForm("  ")),
+    ).toEqual({ error: null, notice: "Link removed." });
+    expect(settingsCalls()).toEqual([
+      {
+        table: "settings",
+        op: "delete",
+        filters: [["key", "tracker_template_url"]],
+      },
+    ]);
+  });
+
+  it("says so when the link cannot be saved", async () => {
+    fx.results["settings.upsert"] = { error: { message: "boom" } };
+    expect(
+      await actions.saveTemplateLink({ error: null }, linkForm(VALID)),
+    ).toEqual({ error: "The link could not be saved. Try again." });
+  });
+});

@@ -70,6 +70,15 @@ test.describe("a member", () => {
     await expect(page.getByRole("button", { name: "Save link" })).toHaveCount(
       0,
     );
+    // N83, N89: every person can send a sheet; only the admin sets passwords.
+    await expect(
+      page.getByRole("form", { name: "Send a sheet to the admin" }),
+    ).toBeVisible();
+    await expect(
+      page.getByText(
+        "The admin makes every login and sets every password. To change yours, ask the admin.",
+      ),
+    ).toBeVisible();
     await snap(page, info.project.name, "guide-member");
   });
 });

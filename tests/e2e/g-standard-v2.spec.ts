@@ -1,12 +1,13 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { snap } from "./support";
+import { snap, STATE } from "./support";
 
 // PRD 11.1, N72 to N75 (M9): the admin connects the example in the Knit Standard Tracker v2
 // layout (fixtures/trackers/Knit_Standard_Tracker_v2_example.xlsx) with Use the standard setup.
 // Maker is who does a task and is assigned it; Owner checks it and shows on the task. CI leaves
 // the file unconnected (KNIT_SEED_TRACKERS in ci.yml), so it is under New sheet found; the
 // flows run on Wed 30 Sep 2026 as the admin, whose aliases are Pragaman and P (seed-local).
+// f-tracker-request has sent the file as a request (N83): activating it ends the request (N86).
 
 const FILE = "Knit_Standard_Tracker_v2_example";
 
@@ -157,4 +158,29 @@ test("the standard setup connects a v2 tab: the Maker gets the task, the Owner s
       has: page.getByRole("link", { name: "Make the retargeting banners" }),
     }),
   ).toContainText("Owner: Pragaman");
+
+  // N86: the request f-tracker-request sent is Connected, and its item is resolved.
+  await page.goto("/admin/attention");
+  await expect(page.getByText("New tracker requested")).toHaveCount(0);
+  await page.goto("/admin/trackers");
+  await expect(
+    page
+      .getByRole("region", { name: "New sheet found" })
+      .getByRole("listitem")
+      .filter({ hasText: FILE }),
+  ).toHaveCount(0);
+});
+
+test.describe("the member who sent it", () => {
+  test.use({ storageState: STATE.member });
+
+  test("sees the request Connected (N85, N86)", async ({ page }) => {
+    await page.goto("/guide#new-tracker");
+    await expect(
+      page
+        .getByRole("region", { name: "Your requests" })
+        .getByRole("listitem")
+        .filter({ hasText: FILE }),
+    ).toContainText("Connected");
+  });
 });

@@ -164,6 +164,10 @@ Giving a word another Knit status changes only new rows and rows that change to 
 
 To connect another tab of a spreadsheet that already has a tracker: **Set up another tab** on the Trackers list or on the tracker's page.
 
+The tracker template link (PRD 12.9, N80): open **Guide** from the user menu (top right), go to For the admin > **Tracker template link**, paste the Google Sheets link of the blank Knit Standard Tracker v2 and press **Save link**. Everyone's Guide then shows **Get the tracker template** under Add a new tracker, which opens Google's make-a-copy page. Save the field empty to remove the link. Nobody uploads a tracker file into Knit: a person copies the template, fills it, moves it into the Knit folder (or asks you to) and tells you, and you connect it as above (N81).
+
+A name marked Not a Knit user that now needs a login (N82): Admin > People > **Add a user** with that name in **Name in trackers**, or link it to an existing person under **Names in trackers**. Their tasks reach their Today from the next pull, at once or within 10 minutes.
+
 ## 5. Go-live on the real trackers (SOW Phase 2)
 
 1. Agree the go-live date. The evening before, check Needs Attention is empty and Sync health shows yesterday closed.

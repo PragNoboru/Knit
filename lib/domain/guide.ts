@@ -8,7 +8,8 @@ export const TEMPLATE_LINK_KEY = "tracker_template_url";
 
 /** N80: a Google Sheets file id, 20 to 128 letters, digits, "-" or "_". */
 const FILE_ID = /^[A-Za-z0-9_-]{20,128}$/;
-const SHEET_PATH = /^\/spreadsheets\/d\/([^/]+)(?:\/.*)?$/;
+/** N80: `/spreadsheets/d/{id}`, or `/spreadsheets/u/1/d/{id}` from a browser with several accounts. */
+const SHEET_PATH = /^\/spreadsheets\/(?:u\/\d{1,2}\/)?d\/([^/]+)(?:\/.*)?$/;
 const MAX_LINK_LENGTH = 2000;
 
 export interface TemplateLink {
@@ -29,7 +30,8 @@ export function templateCopyUrl(fileId: string): string {
 
 /**
  * N80: only a `https://docs.google.com/spreadsheets/d/{id}` link is a template link, with
- * anything after the id (`/edit`, `?usp=sharing`, `#gid=0`). Anything else, a published-to-web
+ * anything after the id (`/edit`, `?usp=sharing`, `#gid=0`), and with or without the account
+ * part (`/u/1/`), which is dropped. Anything else, a published-to-web
  * link (`/d/e/...`) or another host included, is null.
  */
 export function parseTemplateLink(input: string): TemplateLink | null {
@@ -61,7 +63,7 @@ export function parseTemplateLink(input: string): TemplateLink | null {
 /** 12.9: the copy of the template link form and the Guide's template line. */
 export const TEMPLATE_LINK_COPY = {
   label: "Link to the tracker template",
-  hint: "The Google Sheets link of the blank template. Everyone gets a link to make their own copy. Leave it empty to remove it.",
+  hint: "The Google Sheets link of the blank template, shared so everyone can view it. Everyone gets a link to make their own copy. Leave it empty to remove it.",
   submit: "Save link",
   invalid:
     "Paste the link of a Google Sheet. It starts with https://docs.google.com/spreadsheets/d/",

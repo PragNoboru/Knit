@@ -111,8 +111,11 @@ describe("the template link (N80)", () => {
       `${SHEET}/edit?usp=sharing`,
       `  ${SHEET}/  `,
       `https://DOCS.google.com/spreadsheets/d/${ID}/edit`,
+      // A browser signed in to several Google accounts adds /u/{n}/; Knit drops it.
+      `https://docs.google.com/spreadsheets/u/0/d/${ID}/edit`,
+      `https://docs.google.com/spreadsheets/u/1/d/${ID}/edit#gid=0`,
     ])
-      expect(parseTemplateLink(input)).toEqual(LINK);
+      expect(parseTemplateLink(input), input).toEqual(LINK);
   });
 
   it("refuses anything that is not a Google Sheets link", () => {
@@ -134,7 +137,9 @@ describe("the template link (N80)", () => {
       "https://docs.google.com/spreadsheets/d/short/edit",
       `https://docs.google.com/spreadsheets/d/${"a".repeat(129)}`,
       `https://docs.google.com/spreadsheets/d/${ID}%2F..%2Fx`,
-      `https://docs.google.com/spreadsheets/u/0/d/${ID}/edit`,
+      `https://docs.google.com/spreadsheets/u/x/d/${ID}/edit`,
+      `https://docs.google.com/spreadsheets/u/1/${ID}/edit`,
+      `https://docs.google.com/spreadsheets/u/123/d/${ID}/edit`,
       `${SHEET}/edit#${"x".repeat(2000)}`,
     ])
       expect(parseTemplateLink(input), input).toBeNull();
@@ -272,10 +277,34 @@ describe("loadTemplateLink (N80)", () => {
     expect(await loadTemplateLink()).toBeNull();
   });
 
-  it("fails loudly, naming only the error code, when settings cannot be read", async () => {
+  it("shows no link when settings cannot be read, logging only the error code", async () => {
+    fx.settings = { data: { value: SHEET }, error: { code: "PGRST000" } };
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    try {
+      expect(await loadTemplateLink()).toBeNull();
+      expect(log).toHaveBeenCalledTimes(1);
+      const line = String(log.mock.calls[0]![0]);
+      expect(JSON.parse(line)).toMatchObject({
+        event: "guide.template_link_read_failed",
+        code: "PGRST000",
+      });
+      expect(line).not.toContain(ID);
+    } finally {
+      log.mockRestore();
+    }
+  });
+
+  it("still opens the Guide for a member when the read fails", async () => {
     fx.settings = { data: null, error: { code: "PGRST000" } };
-    await expect(loadTemplateLink()).rejects.toThrow(
-      "settings read failed: PGRST000",
-    );
+    fx.user = { id: "u", name: "Asha", email: "a@knit.test", isAdmin: false };
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    try {
+      const { default: GuidePage } = await import("@/app/(app)/guide/page");
+      const shown = text(renderToStaticMarkup(await GuidePage()));
+      expect(shown).toContain("Ask the admin for the tracker template.");
+      expect(shown).toContain("Add a new tracker");
+    } finally {
+      log.mockRestore();
+    }
   });
 });

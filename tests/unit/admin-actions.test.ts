@@ -1244,6 +1244,41 @@ describe("the tracker template link (12.9, N80)", () => {
     expect(fx.calls).toEqual([]);
   });
 
+  it("checks the field with zod: a file or an over-long value is refused, writing nothing", async () => {
+    const withFile = new FormData();
+    withFile.set("url", new File([VALID], "link.txt"));
+    expect(await actions.saveTemplateLink({ error: null }, withFile)).toEqual({
+      error:
+        "Paste the link of a Google Sheet. It starts with https://docs.google.com/spreadsheets/d/",
+    });
+    expect(
+      await actions.saveTemplateLink(
+        { error: null },
+        linkForm(`${VALID}${"x".repeat(2000)}`),
+      ),
+    ).toEqual({
+      error:
+        "Paste the link of a Google Sheet. It starts with https://docs.google.com/spreadsheets/d/",
+    });
+    expect(fx.calls).toEqual([]);
+  });
+
+  it("takes a link with the account part (/u/1/) and saves the plain link", async () => {
+    expect(
+      await actions.saveTemplateLink(
+        { error: null },
+        linkForm(
+          "https://docs.google.com/spreadsheets/u/1/d/1TemplateExampleId_abcdefghijklmnopqrstuvwx/edit",
+        ),
+      ),
+    ).toEqual({ error: null, notice: "Link saved." });
+    expect(settingsCalls()[0]?.payload).toEqual({
+      key: "tracker_template_url",
+      value:
+        "https://docs.google.com/spreadsheets/d/1TemplateExampleId_abcdefghijklmnopqrstuvwx",
+    });
+  });
+
   it("saves a Google Sheets link as the sheet's plain link, with the service role", async () => {
     expect(
       await actions.saveTemplateLink({ error: null }, linkForm(` ${VALID} `)),

@@ -1415,7 +1415,14 @@ export async function saveTemplateLink(
 ): Promise<FormState> {
   const denied = await adminRefusal();
   if (denied) return denied;
-  const input = String(form.get("url") ?? "").trim();
+  // 9.3: the field is checked with zod first; a file or an over-long value is refused.
+  const parsed = z
+    .string()
+    .trim()
+    .max(2000)
+    .safeParse(form.get("url") ?? "");
+  if (!parsed.success) return { error: TEMPLATE_LINK_COPY.invalid };
+  const input = parsed.data;
   if (input === "") {
     const { error } = await createServiceClient()
       .from("settings")

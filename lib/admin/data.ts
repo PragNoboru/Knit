@@ -295,6 +295,31 @@ export type AttentionItem = z.infer<typeof AttentionItem>;
 export const loadAttention = () =>
   callRpc(z.array(AttentionItem), "admin_attention");
 
+const FileStateRow = z.object({ file_id: z.string(), state: z.string() });
+
+/**
+ * N86, 12.8: the drive_files state of each file (new, ignored, connected, not_a_sheet or
+ * left_folder), read as the admin (9.2), so a New tracker requested item can tell a sheet that
+ * left the Knit folder from one that is still there but cannot be set up.
+ */
+export async function loadFileStates(
+  fileIds: readonly string[],
+): Promise<Map<string, string>> {
+  if (fileIds.length === 0) return new Map();
+  const supabase = await getSupabase();
+  const { data, error } = await supabase
+    .from("drive_files")
+    .select("file_id, state")
+    .in("file_id", [...fileIds]);
+  if (error) throw new Error(`drive_files read failed: ${error.code}`);
+  return new Map(
+    z
+      .array(FileStateRow)
+      .parse(data ?? [])
+      .map((row) => [row.file_id, row.state]),
+  );
+}
+
 export const loadBacklog = (trackerId: string) =>
   callRpc(z.array(TaskCard), "admin_backlog", { p_tracker_id: trackerId });
 

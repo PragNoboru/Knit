@@ -18,6 +18,7 @@ import {
 import {
   loadAdminTrackers,
   loadAttention,
+  loadFileStates,
   loadPeople,
   type AttentionItem,
 } from "@/lib/admin/data";
@@ -45,6 +46,21 @@ export default async function AttentionPage() {
   const users = people.users.filter((u) => u.is_active);
   // N86: the pick-tab page (11 step 2) opens only for a file admin_trackers lists.
   const listed = new Set(admin.files.map((f) => f.fileId));
+  // N86, 12.8: "no longer in the Knit folder" only for a sheet that left it. A sheet still in
+  // the folder that admin_trackers does not list (its only tracker was archived) gets neither
+  // Set up nor that line: Open the sheet and Dismiss stay.
+  const states = await loadFileStates(
+    items.flatMap((item) =>
+      item.kind === "tracker_request" && typeof item.detail.fileId === "string"
+        ? [item.detail.fileId]
+        : [],
+    ),
+  );
+  const left = new Set(
+    [...states].flatMap(([fileId, state]) =>
+      state === "left_folder" ? [fileId] : [],
+    ),
+  );
   const groups = groupAttention(items);
 
   return (
@@ -52,7 +68,12 @@ export default async function AttentionPage() {
       <h1 className="text-xl font-semibold tracking-tight">Needs Attention</h1>
       {/* Outcomes such as "Request dismissed." show here, above the list they left (12.8). */}
       <AttentionNotices>
-        <AttentionGroups groups={groups} users={users} listed={listed} />
+        <AttentionGroups
+          groups={groups}
+          users={users}
+          listed={listed}
+          left={left}
+        />
       </AttentionNotices>
     </div>
   );
@@ -62,10 +83,12 @@ function AttentionGroups({
   groups,
   users,
   listed,
+  left,
 }: {
   groups: ReturnType<typeof groupAttention<AttentionItem>>;
   users: { id: string; name: string }[];
   listed: ReadonlySet<string>;
+  left: ReadonlySet<string>;
 }) {
   return (
     <>
@@ -103,6 +126,7 @@ function AttentionGroups({
                       item={item}
                       users={users}
                       listed={listed}
+                      left={left}
                     />
                   ))}
                 </ul>
@@ -119,10 +143,12 @@ function Item({
   item,
   users,
   listed,
+  left,
 }: {
   item: AttentionItem;
   users: { id: string; name: string }[];
   listed: ReadonlySet<string>;
+  left: ReadonlySet<string>;
 }) {
   const row = attentionRow(item.detail, item.task?.rowHint ?? null);
   const sheetLink =
@@ -228,7 +254,7 @@ function Item({
           </Link>
         ) : null}
         {item.kind === "tracker_request" ? (
-          <TrackerRequestActions item={item} listed={listed} />
+          <TrackerRequestActions item={item} listed={listed} left={left} />
         ) : (
           <ActionButton
             action={setAttentionState.bind(null, item.id, "dismissed")}
@@ -244,14 +270,17 @@ function Item({
 
 /**
  * N86, 12.8: Set up (11 step 2 for the sheet) only while the sheet is listed in the Knit
- * folder, Open the sheet, and Dismiss with a reason the person sees.
+ * folder, "The sheet is no longer in the Knit folder." only when it left it, Open the sheet,
+ * and Dismiss with a reason the person sees.
  */
 function TrackerRequestActions({
   item,
   listed,
+  left,
 }: {
   item: AttentionItem;
   listed: ReadonlySet<string>;
+  left: ReadonlySet<string>;
 }) {
   const fileId =
     typeof item.detail.fileId === "string" ? item.detail.fileId : "";
@@ -265,11 +294,11 @@ function TrackerRequestActions({
         >
           Set up
         </Link>
-      ) : (
+      ) : left.has(fileId) ? (
         <span className="text-sm text-muted-foreground">
           The sheet is no longer in the Knit folder.
         </span>
-      )}
+      ) : null}
       {fileId !== "" ? (
         <a
           href={`https://docs.google.com/spreadsheets/d/${encodeURIComponent(fileId)}/edit`}

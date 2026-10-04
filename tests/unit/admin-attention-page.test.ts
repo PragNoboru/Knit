@@ -10,12 +10,23 @@ import type { AttentionItem } from "@/lib/admin/data";
 const data = vi.hoisted(() => ({
   items: [] as unknown[],
   files: [] as unknown[],
+  /** drive_files states, as loadFileStates reads them. */
+  states: {} as Record<string, string>,
+  stateReads: [] as string[][],
 }));
 
 vi.mock("@/lib/admin/data", () => ({
   loadAttention: async () => data.items,
   loadPeople: async () => ({ users: [], aliases: [] }),
   loadAdminTrackers: async () => ({ trackers: [], files: data.files }),
+  loadFileStates: async (ids: readonly string[]) => {
+    data.stateReads.push([...ids]);
+    return new Map(
+      ids.flatMap((id) =>
+        data.states[id] === undefined ? [] : [[id, data.states[id]]],
+      ),
+    );
+  },
 }));
 vi.mock("@/lib/actions/admin", () => ({
   dismissTrackerRequest: vi.fn(),
@@ -56,9 +67,15 @@ const listed = (fileId: string) => ({
   requestedBy: "Shlok",
 });
 
-async function render(items: AttentionItem[], files: unknown[]) {
+async function render(
+  items: AttentionItem[],
+  files: unknown[],
+  states: Record<string, string> = { [FILE]: "new" },
+) {
   data.items = items;
   data.files = files;
+  data.states = states;
+  data.stateReads = [];
   const { default: AttentionPage } =
     await import("@/app/(app)/admin/attention/page");
   return renderToStaticMarkup(await AttentionPage())
@@ -84,10 +101,37 @@ describe("New tracker requested (N86)", () => {
   });
 
   it("says the sheet left the Knit folder instead of offering Set up", async () => {
-    const html = await render([request()], []);
+    const html = await render([request()], [], { [FILE]: "left_folder" });
     expect(html).toContain("The sheet is no longer in the Knit folder.");
     expect(html).not.toContain(">Set up<");
     expect(html).toContain(">Open the sheet<");
+    // Only the requested files' states are read.
+    expect(data.stateReads).toEqual([[FILE]]);
+  });
+
+  it("does not say the sheet left the folder when it is there but cannot be set up (its draft was archived)", async () => {
+    // Set up made a draft (drive_files connected), then the draft was archived: admin_trackers
+    // no longer lists the file, but the sheet is still in the Knit folder.
+    const html = await render([request()], [], { [FILE]: "connected" });
+    expect(html).not.toContain("The sheet is no longer in the Knit folder.");
+    expect(html).not.toContain(">Set up<");
+    expect(html).toContain(">Open the sheet<");
+    expect(html.match(/>Dismiss</g)).toHaveLength(1);
+  });
+
+  it("reads no file states when no request is open", async () => {
+    await render(
+      [
+        request({
+          id: 32,
+          kind: "calendar_ending",
+          detail: { last: "2027-12-31" },
+          reporter: null,
+        }),
+      ],
+      [],
+    );
+    expect(data.stateReads).toEqual([[]]);
   });
 
   it("keeps the plain Dismiss for other items only", async () => {

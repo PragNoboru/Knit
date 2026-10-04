@@ -95,26 +95,32 @@ function Notice({
       return (
         <div className={box}>
           {text}
-          <Link
-            href="/admin/trackers"
-            className={`${buttonVariants({ size: "sm" })} mt-3`}
-          >
-            Open Trackers
-          </Link>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Link
+              href="/admin/trackers"
+              className={buttonVariants({ size: "sm" })}
+            >
+              Open Trackers
+            </Link>
+            <GuideLink />
+          </div>
         </div>
       );
     case "no_tasks":
       return (
         <div className={box}>
           {text}
-          {notice.adminContact ? (
-            <a
-              href={`mailto:${notice.adminContact.email}`}
-              className={`${buttonVariants({ size: "sm", variant: "outline" })} mt-3`}
-            >
-              Contact {notice.adminContact.name}
-            </a>
-          ) : null}
+          <div className="mt-3 flex flex-wrap gap-2">
+            {notice.adminContact ? (
+              <a
+                href={`mailto:${notice.adminContact.email}`}
+                className={buttonVariants({ size: "sm", variant: "outline" })}
+              >
+                Contact {notice.adminContact.name}
+              </a>
+            ) : null}
+            <GuideLink />
+          </div>
         </div>
       );
     case "off_day":
@@ -183,6 +189,18 @@ function Notice({
     default:
       return <div className={box}>{text}</div>;
   }
+}
+
+/** 12.7, N78: the first-run states also point to the Guide (12.9). */
+function GuideLink() {
+  return (
+    <Link
+      href="/guide"
+      className={buttonVariants({ size: "sm", variant: "outline" })}
+    >
+      Open the Guide
+    </Link>
+  );
 }
 
 function UpcomingRow({

@@ -1,6 +1,6 @@
 "use client";
 
-import { LogOut, RefreshCw, UserRound } from "lucide-react";
+import { BookOpen, LogOut, RefreshCw, UserRound } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
@@ -13,6 +13,7 @@ import {
   DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuLinkItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -21,7 +22,10 @@ import { callAction, callVoidAction } from "@/lib/actions/call";
 import { syncNow } from "@/lib/actions/tasks";
 import { cn } from "@/lib/utils";
 
-/** PRD 12.2: wordmark, date, links (Today, Calendar, All Tasks, Admin), Sync now, user menu. */
+/**
+ * PRD 12.2: wordmark, date, links (Today, Calendar, All Tasks, Admin), Sync now, user menu
+ * (name and email, Guide, Sign out; N78).
+ */
 export function TopBar({
   dateLabel,
   name,
@@ -108,6 +112,11 @@ export function TopBar({
                 </DropdownMenuLabel>
               </DropdownMenuGroup>
               <DropdownMenuSeparator />
+              {/* N78: the Guide (12.9) is reached from here, not from the main links. */}
+              <DropdownMenuLinkItem render={<Link href="/guide" />}>
+                <BookOpen aria-hidden />
+                Guide
+              </DropdownMenuLinkItem>
               <DropdownMenuItem
                 onClick={() =>
                   startSignOut(async () => {

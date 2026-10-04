@@ -43,7 +43,7 @@ export const GROUP_ORDER: readonly GroupKey[] = [
   "done",
 ];
 
-const TODAY_TITLES: Record<GroupKey, string> = {
+export const TODAY_TITLES: Record<GroupKey, string> = {
   spillover: "Spillover",
   due: "Due today",
   ongoing: "Ongoing",

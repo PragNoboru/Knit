@@ -85,8 +85,8 @@ where k.source_snapshot ? 'statusKey'
 4. When the deploy finishes, note the address Vercel gave the project (Settings > Domains).
 5. If it differs from the one used in step 2, change `APP_URL` in Settings > Environment Variables and redeploy (Deployments > the latest > Redeploy).
 
-- Function time limit (PRD 7.3): every job call works for 80% of its function's `maxDuration` and leaves the rest to the next call. Knit ships with `maxDuration = 60` seconds, which every plan allows. To give each call the plan's allowed maximum (for example 300 seconds with Fluid compute on, which new projects have by default), change the value in all six places together, then deploy and run `cron.sql` again (2.4):
-  - `export const maxDuration = 60;` in `app/api/jobs/pull/route.ts`, `app/api/jobs/push/route.ts`, `app/api/jobs/close/route.ts`, `app/api/jobs/structure/route.ts` and `app/(app)/layout.tsx` (Sync now);
+- Function time limit (PRD 7.3): every job call works for 80% of its function's `maxDuration` and leaves the rest to the next call. Knit ships with `maxDuration = 60` seconds, which every plan allows. To give each call the plan's allowed maximum (for example 300 seconds with Fluid compute on, which new projects have by default), change the value in all seven places together, then deploy and run `cron.sql` again (2.4):
+  - `export const maxDuration = 60;` in `app/api/jobs/pull/route.ts`, `app/api/jobs/push/route.ts`, `app/api/jobs/close/route.ts`, `app/api/jobs/structure/route.ts`, `app/(app)/layout.tsx` (Sync now) and `app/(app)/guide/page.tsx` (Check and send, whose Google requests stop at 40 s whatever the value, PRD N88);
   - `timeout_milliseconds := 60000` in `supabase/sql/cron.sql` (the value in milliseconds).
 
   A value above the plan's limit makes the deploy fail: check Project Settings > Functions first.
